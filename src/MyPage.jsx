@@ -1,0 +1,235 @@
+import React, { useState, useEffect } from "react";
+import AvatarEditorModal from "./AvatarEditorModal";
+import { myStyles } from "./MyPage.styles";
+// ★ [수정] getCreditInfo 추가 임포트
+import { getTierInfo, getAvatarUrl, avatarStyles, getCreditInfo } from "./MyPage.utils";
+
+// ★ 로직 파일 임포트 (.js)
+import { useMyPageLogic } from "./useMyPageLogic.js"; 
+
+// ★ 뷰 파일 임포트 (.jsx) - TransactionHistoryView 추가됨
+import { 
+  PasswordView, DepositView, WithdrawView, HistoryView, SettingsView, TransactionHistoryView,
+  NicknameView // ★ [신규] 닉네임 변경 뷰
+} from "./MyPageViews.jsx";
+
+// ★ [수정완료] telegramLink 와 t 등 모든 인자(props)를 빠짐없이 받도록 세팅
+export default function MyPage({ 
+  user, 
+  telegramLink,
+  onBack, 
+  onLogout, 
+  confirmedImage, 
+  confirmedAvatarIdx, 
+  onAvatarChange, 
+  onUpdatePoint, 
+  t,
+  setActiveTab,
+  backHandlerRef // ★★★ [신규] Dashboard의 로컬 뒤로가기 핸들러 ref
+}) {
+  const [view, setView] = useState("main");
+  const isKo = t.home === "홈페이지";
+  const isJa = t.home === "ホーム";
+  const tr = (ko, ja, en) => isKo ? ko : isJa ? ja : en;
+  
+  // ★★★ [신규] 서브뷰 → main 뒤로가기 로직을 Dashboard의 backHandlerRef에 등록
+  //   Dashboard의 popstate 감지 or goBack 호출 시 이 함수가 먼저 실행됨
+  //   반환값 true = 처리 완료 (Dashboard는 아무 것도 안 함)
+  //   반환값 false = 처리 안 함 (Dashboard가 탭 스택 pop)
+  useEffect(() => {
+    if (!backHandlerRef) return;
+    
+    backHandlerRef.current = () => {
+      if (view === "main") {
+        return false; // main에서는 상위 뒤로가기 (Dashboard가 처리)
+      }
+      
+      // 이력 관련 서브뷰는 상세 뷰로 돌아가기
+      if (view === "deposit_history") {
+        setView("deposit");
+        return true;
+      }
+      if (view === "withdraw_history") {
+        setView("withdraw");
+        return true;
+      }
+      if (view === "profile") {
+        setView("settings");
+        return true;
+      }
+      // ★ [신규] 닉네임 변경 화면도 설정으로 돌아가기
+      if (view === "nickname") {
+        setView("settings");
+        return true;
+      }
+      
+      // 나머지 서브뷰는 main으로
+      setView("main");
+      return true;
+    };
+    
+    return () => {
+      if (backHandlerRef.current) {
+        backHandlerRef.current = null;
+      }
+    };
+  }, [view, backHandlerRef]);
+  
+  // ★ [수정] myDeposits, myWithdraws (내역 데이터) 받아오기 / 데일리 보너스 관련 값 제거
+ const { 
+    userInfo, myDeposits, myWithdraws,
+    requestDeposit, requestWithdraw, updatePassword, updateAvatar,
+    updateNickname // ★ [신규] 닉네임 변경 함수
+  } = useMyPageLogic(user, onUpdatePoint, isKo);
+
+  const [tempSelectedIdx, setTempSelectedIdx] = useState(confirmedAvatarIdx || 0);
+  const [tempUploadedImg, setTempUploadedImg] = useState(confirmedImage || null);
+  const [showAvatarEditor, setShowAvatarEditor] = useState(false);
+
+  if (!userInfo) return <div style={myStyles.loading}>SECRET MEMBERSHIP...</div>;
+  // ★ [수정] 다이아 보유량 기반 자동계산 대신, 관리자가 지정한 userInfo.tier 값을 그대로 사용
+  const tier = getTierInfo(userInfo.tier);
+
+  // ★ [신규] 신용점수 계산 - 관리자가 지정한 userInfo.creditScore 값 사용
+  // 값이 없으면 기본값 100 (첫 가입자)
+  const credit = getCreditInfo(userInfo.creditScore);
+
+  // --- 화면 라우팅 ---
+  if (view === "profile") return <PasswordView onBack={()=>setView("settings")} isKo={isKo} isJa={isJa} onSubmit={updatePassword} userInfo={userInfo} />;
+  
+  // ★ [신규] 닉네임 변경 화면
+  if (view === "nickname") return <NicknameView onBack={()=>setView("settings")} isKo={isKo} isJa={isJa} onSubmit={updateNickname} userInfo={userInfo} />;
+  
+  // ★ [수정] 입금 화면: 내역 버튼 누르면 'deposit_history'로 이동
+  if (view === "deposit") return <DepositView onBack={()=>setView("main")} isKo={isKo} isJa={isJa} onSubmit={requestDeposit} onViewHistory={()=>setView("deposit_history")} />;
+  
+  // ★ [수정] 출금 화면: userInfo를 넘겨서 저장된 계좌 자동 불러오기 활성화
+  if (view === "withdraw") return <WithdrawView onBack={()=>setView("main")} isKo={isKo} isJa={isJa} onSubmit={requestWithdraw} onViewHistory={()=>setView("withdraw_history")} userInfo={userInfo} />;
+  
+  // ★ [신규] 입금 신청 내역 화면 연결
+  if (view === "deposit_history") return <TransactionHistoryView onBack={()=>setView("deposit")} isKo={isKo} isJa={isJa} title={tr("입금 신청 내역", "入金申請履歴", "Deposit History")} data={myDeposits} />;
+  
+  // ★ [신규] 출금 신청 내역 화면 연결
+  if (view === "withdraw_history") return <TransactionHistoryView onBack={()=>setView("withdraw")} isKo={isKo} isJa={isJa} title={tr("출금 신청 내역", "出金申請履歴", "Withdraw History")} data={myWithdraws} />;
+
+  if (view === "history") return <HistoryView onBack={()=>setView("main")} isKo={isKo} isJa={isJa} userId={userInfo.id} />;
+if (view === "settings") return <SettingsView onBack={()=>setView("main")} isKo={isKo} isJa={isJa} onChangeView={setView} telegramLink={telegramLink} />;
+
+  // --- 메인 대시보드 (기존 유지) ---
+  return (
+    <div style={myStyles.container}>
+      <div style={myStyles.topBar}>
+        <button onClick={onBack} style={myStyles.backBtn}>〈</button>
+        <span style={myStyles.topTitle}>PRIVATE LOUNGE</span>
+        <span onClick={() => setView("settings")} style={myStyles.settingsIcon}>⚙️</span>
+      </div>
+      
+      <div style={myStyles.profileHeaderMain}>
+        <div style={myStyles.profileInfoMain}>
+          <div style={myStyles.avatarWrapper}>
+            <div style={myStyles.avatarLarge}>
+              {confirmedImage ? 
+                <img src={confirmedImage} alt="profile" style={myStyles.imgFull} /> : 
+                <img src={getAvatarUrl(confirmedAvatarIdx, userInfo.id)} alt="avatar" style={myStyles.imgFull} />
+              }
+            </div>
+            <button style={myStyles.editBadgeOutside} onClick={() => setShowAvatarEditor(true)}>{tr("변경", "変更", "Edit")}</button>
+          </div>
+          <div style={myStyles.userTextMain}>
+            <div style={myStyles.userIdMain}>
+              {/* ★ [수정] 표시 우선순위: nickname > name > id */}
+              {userInfo.nickname || userInfo.name || userInfo.id}
+              <span style={{...myStyles.vipBadge, background: tier.color, color:'#000'}}>{tier.name}</span>
+            </div>
+
+            {/* ★ [수정] 기존 UID 표시 제거 → 신용점수 + 진행바로 교체 */}
+            <div style={myStyles.creditBox}>
+              <div style={myStyles.creditTopRow}>
+                <span style={myStyles.creditLabel}>
+                  {tr("신용점수", "信用スコア", "CREDIT SCORE")}
+                </span>
+                <div style={{display:'flex', alignItems:'center'}}>
+                  <span style={{...myStyles.creditScoreText, color: credit.color}}>
+                    {credit.score}
+                  </span>
+                  <span style={{
+                    ...myStyles.creditRankText,
+                    background: `${credit.color}22`,
+                    color: credit.color,
+                    border: `1px solid ${credit.color}55`,
+                  }}>
+                    {isKo ? credit.labelKo : credit.label}
+                  </span>
+                </div>
+              </div>
+              <div style={myStyles.creditBarOuter}>
+                <div style={{
+                  ...myStyles.creditBarInner,
+                  width: `${credit.percent}%`,
+                  background: `linear-gradient(to right, ${credit.color}88, ${credit.color})`,
+                }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={myStyles.balanceCard}>
+        <div style={myStyles.balanceItem}>
+          <div style={myStyles.label}>{tr("보유 다이아몬드", "所持ダイヤモンド", "Diamonds")}</div>
+          <div style={myStyles.value}>💎 {userInfo.diamond?.toLocaleString() ?? 0}</div>
+        </div>
+        <div style={myStyles.divider}></div>
+        {/* ★ [수정] 데일리 보너스 버튼 자리를 빠른 출금 버튼으로 교체 - 기존 출금 로직/화면(WithdrawView) 그대로 재사용 */}
+        <div style={{...myStyles.balanceItem, cursor: 'pointer'}} onClick={() => setView("withdraw")}>
+          <div style={{...myStyles.label, color: '#D4AF37'}}>{tr("빠른 출금", "クイック出金", "Quick Withdraw")}</div>
+          <div style={myStyles.value}>🏦</div>
+        </div>
+      </div>
+
+      <div style={myStyles.menuList}>
+        {/* ★ [수정] CustomEvent로 직접 발송 → Dashboard가 리스닝해서 이벤트 탭으로 이동 (props 없이 확실히) */}
+        <div style={myStyles.goldMenu} onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-event'))}>
+          <div style={myStyles.goldMenuContent}>
+            <div style={myStyles.goldTag}>HOT</div>
+            <span style={myStyles.goldMenuTitle}>{tr("프라이빗 이벤트 참여", "プライベートイベント参加", "Join Event")}</span>
+          </div>
+          <span>❯</span>
+        </div>
+        <div style={myStyles.menuGroup}>
+          <div style={myStyles.menuItem} onClick={() => setView("deposit")}>
+            <span style={myStyles.menuTitle}>💰 &nbsp; {tr("입금 신청", "入金申請", "Deposit")}</span>
+            <span style={myStyles.arrow}>❯</span>
+          </div>
+          <div style={myStyles.menuItem} onClick={() => setView("withdraw")}>
+            <span style={myStyles.menuTitle}>🏦 &nbsp; {tr("출금 신청", "出金申請", "Withdraw")}</span>
+            <span style={myStyles.arrow}>❯</span>
+          </div>
+          <div style={myStyles.menuItem} onClick={() => setView("history")}>
+            <span style={myStyles.menuTitle}>📋 &nbsp; {tr("이용 내역", "利用履歴", "History")}</span>
+            <span style={myStyles.arrow}>❯</span>
+          </div>
+          {/* ★ [수정완료] App.jsx의 telegramLink가 전체 URL 형식이므로 그대로 띄우게 연결했습니다. */}
+          <div style={myStyles.menuItem} onClick={() => window.open(telegramLink || 'https://t.me/BANADA_support', '_blank')}>
+            <span style={myStyles.menuTitle}>💬 &nbsp; {tr("1:1 실시간 상담", "1:1リアルタイム相談", "1:1 Support")}</span>
+            <span style={myStyles.arrow}>❯</span>
+          </div>
+        </div>
+        <button onClick={onLogout} style={{...myStyles.logoutBtnMain, marginTop: 40, border: '1px solid #444', color: '#ff4d4d', fontWeight: 'bold', letterSpacing: '2px'}}>{tr("로그아웃", "ログアウト", "LOG OUT")}</button>
+      </div>
+
+      {showAvatarEditor && 
+        <AvatarEditorModal 
+          userId={userInfo.id} 
+          tempSelectedIdx={tempSelectedIdx} 
+          tempUploadedImg={tempUploadedImg} 
+          setTempSelectedIdx={setTempSelectedIdx} 
+          setTempUploadedImg={setTempUploadedImg} 
+          onClose={() => setShowAvatarEditor(false)} 
+          onApply={() => updateAvatar(tempUploadedImg, tempSelectedIdx, onAvatarChange).then(res => res && setShowAvatarEditor(false))} 
+          onRandom={() => { setTempUploadedImg(null); setTempSelectedIdx(Math.floor(Math.random() * avatarStyles.length)); }} 
+        />
+      }
+    </div>
+  );
+}

@@ -1,0 +1,924 @@
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { EventService, soundManager, ITEM_CONFIG, syncServerClock } from "./EventService"; 
+import { db } from "./firebase";
+import { collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc, updateDoc, increment, addDoc, getDocs, orderBy, limit, runTransaction } from "firebase/firestore";
+
+export { ITEM_CONFIG as allItems }; 
+
+/* ============================================================
+ * 배당 계산 공통 유틸
+ * ------------------------------------------------------------
+ * 새 규칙 (2026-07 개편):
+ *   - 이기면 무조건 배팅 총액의 2배 지급 (1개든 2개든 동일)
+ *   - 2개 걸었을 경우 2개 다 맞아야만 승리 (본전 방어 없음)
+ *   - 지면 0 지급 (배팅액 소실)
+ * ============================================================ */
+function calcWinAmount(items, matchedCount, totalCost) {
+  if (!items || items.length === 0 || !totalCost) return 0;
+  const isFullMatch = matchedCount === items.length;
+  return isFullMatch ? totalCost * 2 : 0;
+}
+
+/* ★ [신규] 다중 베팅 최대 개수 - 한 라운드에 최대 몇 번까지 베팅 가능한지 */
+export const MAX_BETS_PER_ROUND = 2;
+
+export function useEventEngine(user, userPoint, onUpdatePoint, pointControls) {
+  // --- Refs ---
+  const isProcessingRef = useRef(false);
+  const pointRef = useRef(userPoint);
+  // ★ [변경] betRef: 단일 베팅 → 베팅 배열
+  const betsRef = useRef([]);
+  const roundRef = useRef(0); 
+
+  useEffect(() => { pointRef.current = userPoint; }, [userPoint]);
+
+  const [totalHistory, setTotalHistory] = useState([]);
+
+  const [myHistory, setMyHistory] = useState([]);
+
+  const [gameState, setGameState] = useState({
+    round: 0,
+    timeLeft: 60,
+    isDrawing: false
+  });
+
+  const [drawingItems, setDrawingItems] = useState(["/icons/instagram.png", "/icons/kakao.png"]);
+  // ★ [변경] myPendingBet → myPendingBets (배열, 최대 MAX_BETS_PER_ROUND개)
+  const [myPendingBets, setMyPendingBets] = useState([]);
+  const [showResult, setShowResult] = useState(null);
+  const [liveNoti, setLiveNoti] = useState("");
+
+  const [impactTick, setImpactTick] = useState(0);
+
+  // ★ [신규] Firebase에서 내 후원기록 불러오기 (다기기 동기화 핵심)
+  // ★ [대공사] myHistory를 event_bets 실시간 구독 기반으로 전환
+  //   기존: user_bet_history 컬렉션에서 mount 시점 1회 로드 + 로컬 상태 관리
+  //   문제: 관리자가 event_bets를 편집해도 로컬 캐시가 안 바뀜 → 후원 기록에 반영 안 됨
+  //   신규: event_bets를 실시간 구독 → source of truth 삼아서 admin 편집 즉시 반영
+  //   ※ localStorage는 fast initial paint용 캐시로만 사용 (즉시 표시 후 구독으로 갱신)
+  useEffect(() => {
+    if (!user?.id) return;
+
+    // 빠른 초기 표시: 로컬 캐시로 우선 세팅
+    const cached = localStorage.getItem(`event_my_history_${user.id}`);
+    if (cached) {
+      try { setMyHistory(JSON.parse(cached)); } catch (e) {}
+    }
+
+    // 실시간 구독: event_bets에서 유저의 정산 완료된 배팅 가져오기
+    const q = query(
+      collection(db, "event_bets"),
+      where("userId", "==", user.id)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const records = snap.docs
+        .map(d => {
+          const b = d.data();
+          // 진행중 배팅(win null)은 히스토리에서 제외
+          if (b.win === null || b.win === undefined) return null;
+          const cost = b.betAmount || 0;
+          const items = b.items || [];
+          // 지급액: 승리면 배팅액 * 2, 패배/무승부면 0
+          const earn = b.win === true ? cost * 2 : 0;
+          // 날짜 표시
+          const ts = b.timestamp ? new Date(b.timestamp) : new Date();
+          const date = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+          return {
+            round: b.round,
+            selected: items,
+            cost,
+            earn,
+            date,
+            status: b.win === true ? "승리" : b.win === false ? "패배" : "무승부",
+            docId: d.id,
+            // ※ winItems(회차 우승 아이콘)는 EventSection에서 totalHistory 룩업으로 채움
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.round - a.round)
+        .slice(0, 30);
+
+      setMyHistory(records);
+      // 로컬 캐시 갱신 (다음 mount 때 fast paint용)
+      try { localStorage.setItem(`event_my_history_${user.id}`, JSON.stringify(records)); } catch (e) {}
+    }, (err) => {
+      console.error("event_bets 실시간 구독 실패:", err);
+    });
+
+    return () => unsub();
+  }, [user?.id]);
+
+  // ★ [유지] saveMyHistoryRecord - 하위 호환 목적으로 유지 (외부 호출자 있을 수 있음)
+  //   실제로는 event_bets updateDoc이 진짜 저장이고, 이건 fallback 정도로만 사용
+  const saveMyHistoryRecord = useCallback(async (record) => {
+    if (!user?.id) return;
+    // event_bets 구독이 알아서 처리하므로 여기선 아무것도 안 해도 됨
+    // 다만 subscription 딜레이가 있을 수 있으니 로컬 상태만 즉시 반영
+    setMyHistory(prev => {
+      const exists = prev.find(h => h.round === record.round && JSON.stringify(h.selected) === JSON.stringify(record.selected));
+      if (exists) return prev;
+      const updated = [record, ...prev].slice(0, 30);
+      try { localStorage.setItem(`event_my_history_${user.id}`, JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  }, [user?.id]);
+
+  const updatePointWithAnim = useCallback((newPoint) => {
+    if (onUpdatePoint) {
+      onUpdatePoint(newPoint);
+      if (pointControls) pointControls.start({ scale: [1, 1.2, 1], transition: { duration: 0.3 } });
+    }
+  }, [onUpdatePoint, pointControls]);
+
+  // ★ [수정] 관리자 실시간 편집과 충돌 방지를 위해 increment 방식으로 저장
+  //   기존: updateDoc(userRef, { diamond: newPoint }) - 절대값 덮어쓰기 → 관리자 편집 유실 위험
+  //   신규: updateDoc(userRef, { diamond: increment(delta) }) - 원자적 증감 → 충돌 없음
+  //   호환: 기존 syncDiamondToFirestore(newPoint) 호출도 계속 지원 (내부에서 delta 계산)
+  const syncDiamondDelta = useCallback(async (delta) => {
+    if (!user?.id || !delta) return;
+    // ★ [재시도 추가] 인터넷 끊김 등으로 실패해도 자동 재시도
+    //   빠른 재시도: 200ms → 200ms → 200ms 간격으로 최대 4번 시도
+    //   (기존: 1초 → 2초 → 4초 지수 백오프 → 유저 대기 시간 길어서 UX 나쁨)
+    //   유저 다이아 지급이 "가끔 실패"하던 문제 해결
+    const maxRetries = 4;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        await updateDoc(doc(db, "users", user.id), { diamond: increment(delta) });
+        return; // 성공하면 즉시 종료
+      } catch (err) {
+        console.warn(`💎 잔액 증감 실패 (시도 ${attempt + 1}/${maxRetries}):`, err.message);
+        if (attempt < maxRetries - 1) {
+          // ★ [수정] 짧은 딜레이로 즉시 재시도 (200ms)
+          await new Promise(r => setTimeout(r, 200));
+        } else {
+          console.error("💎 잔액 증감 최종 실패 (Worker/어드민이 백업 처리 예정):", err);
+        }
+      }
+    }
+  }, [user?.id]);
+
+  const syncDiamondToFirestore = useCallback(async (newPoint) => {
+    if (!user?.id) return;
+    // 절대값을 delta로 변환 (현재 pointRef 기준)
+    const currentRemote = pointRef.current;
+    const delta = newPoint - currentRemote;
+    if (delta === 0) return;
+    try {
+      await updateDoc(doc(db, "users", user.id), { diamond: increment(delta) });
+    } catch (err) {
+      console.error("💎 잔액 동기화 실패:", err);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    const initEngine = async () => {
+      const { round: currentRound } = EventService.getCurrentRoundInfo();
+      
+      // 1. 전체 히스토리 복구
+      const savedTotal = JSON.parse(localStorage.getItem("event_total_history") || "[]");
+      const lastSavedRound = savedTotal.length > 0 ? savedTotal[0].round : currentRound - 51;
+
+      if (currentRound > lastSavedRound + 1) {
+        const missed = await EventService.getMissedHistory(lastSavedRound, currentRound, 50);
+        const updatedTotal = [...missed.reverse(), ...savedTotal].slice(0, 50);
+        setTotalHistory(updatedTotal);
+        localStorage.setItem("event_total_history", JSON.stringify(updatedTotal));
+      } else {
+        setTotalHistory(savedTotal);
+      }
+
+      // 2. ★ [변경] 부재중 베팅 자동 정산 - 배열 대응
+      //    - 예전 키(pending_bet_{id}, 단일) 마이그레이션도 함께 처리
+      //    - 새 키(pending_bets_{id}, 배열)로 저장/조회
+      let savedBets = [];
+      try {
+        const newFormat = localStorage.getItem(`pending_bets_${user?.id}`);
+        if (newFormat) {
+          savedBets = JSON.parse(newFormat) || [];
+        } else {
+          // 이전 단일 베팅 포맷과의 하위 호환성 처리
+          const oldFormat = localStorage.getItem(`pending_bet_${user?.id}`);
+          if (oldFormat) {
+            const oldBet = JSON.parse(oldFormat);
+            if (oldBet) savedBets = [oldBet];
+            // 오래된 키 제거
+            localStorage.removeItem(`pending_bet_${user?.id}`);
+          }
+        }
+      } catch (e) {
+        console.warn("부재중 베팅 로딩 실패:", e);
+        savedBets = [];
+      }
+
+      if (savedBets.length > 0) {
+        // 과거 라운드 베팅과 현재 라운드 베팅 분리
+        const pastBets = savedBets.filter(b => b.round < currentRound);
+        const currentBets = savedBets.filter(b => b.round >= currentRound);
+
+        if (pastBets.length > 0) {
+          // ★ 과거 라운드 베팅들을 회차별로 그룹화해서 정산
+          const roundGroups = {};
+          for (const bet of pastBets) {
+            if (!roundGroups[bet.round]) roundGroups[bet.round] = [];
+            roundGroups[bet.round].push(bet);
+          }
+
+          let totalMissedWin = 0;
+          for (const roundStr of Object.keys(roundGroups)) {
+            const roundNum = parseInt(roundStr, 10);
+            
+            // ★ [수정] 부재중 정산도 서버 중앙집중식 결과 사용
+            //   game_history/{round} 우선 조회 → 없으면 fixedResult/generateResult
+            let winNames;
+            try {
+              const historySnap = await getDoc(doc(db, "game_history", String(roundNum)));
+              if (historySnap.exists() && Array.isArray(historySnap.data().winner) && historySnap.data().winner.length > 0) {
+                winNames = historySnap.data().winner;
+              } else {
+                const fixedResult = await EventService.getFixedResult(roundNum);
+                const winObjs = fixedResult || EventService.generateResult(roundNum);
+                winNames = winObjs.map(i => i.name);
+              }
+            } catch (e) {
+              console.warn(`부재중 정산 결과 조회 실패 (${roundNum}), fallback:`, e);
+              const fixedResult = await EventService.getFixedResult(roundNum);
+              const winObjs = fixedResult || EventService.generateResult(roundNum);
+              winNames = winObjs.map(i => i.name);
+            }
+            const winObjs = winNames.map(name => ITEM_CONFIG.find(i => i.name === name)).filter(Boolean);
+            const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+            for (const parsedBet of roundGroups[roundStr]) {
+              const { items, totalCost, docId } = parsedBet;
+              const matchedCount = items.filter(name => winNames.includes(name)).length;
+              const winAmount = calcWinAmount(items, matchedCount, totalCost);
+              const isWin = winAmount > 0;
+
+              totalMissedWin += winAmount;
+
+              // ★ [신규] event_bets 문서에도 win 확정 반영 (구독이 감지해서 myHistory 자동 갱신)
+              if (docId) {
+                try {
+                  await updateDoc(doc(db, "event_bets", docId), {
+                    win: isWin,
+                    balanceAtEnd: pointRef.current + totalMissedWin,
+                    balanceAtEndAt: new Date().toISOString(),
+                  });
+                } catch (e) {
+                  console.warn(`event_bets 부재중 정산 저장 실패 (${docId}):`, e);
+                }
+              }
+
+              const newRecord = {
+                round: roundNum, selected: [...items], winNames, winIcons: winObjs.map(i => i.icon),
+                earn: winAmount, cost: totalCost, date: currentTime, status: "자동정산"
+              };
+
+              // 중복 방지: 이미 같은 라운드+선택 기록이 있으면 스킵
+              setMyHistory(prev => {
+                if (prev.find(h => h.round === roundNum && JSON.stringify(h.selected) === JSON.stringify(items))) return prev;
+                saveMyHistoryRecord(newRecord);
+                return prev; // saveMyHistoryRecord 내부에서 상태 업데이트
+              });
+            }
+          }
+
+          // 이긴 금액 총합을 로컬 + Firestore 반영
+          if (totalMissedWin > 0) {
+            const newPoint = pointRef.current + totalMissedWin;
+            updatePointWithAnim(newPoint);
+            // ★ [수정] 절대값 대신 delta로 증감 - 관리자 편집과 충돌 방지
+            syncDiamondDelta(totalMissedWin);
+            pointRef.current = newPoint;
+          }
+        }
+
+        // 현재 라운드 베팅은 그대로 상태에 유지 (진행중)
+        if (currentBets.length > 0) {
+          betsRef.current = currentBets;
+          setMyPendingBets(currentBets);
+          localStorage.setItem(`pending_bets_${user?.id}`, JSON.stringify(currentBets));
+        } else {
+          localStorage.removeItem(`pending_bets_${user?.id}`);
+        }
+      }
+    };
+    initEngine();
+  }, [user?.id]);
+
+  // --- 관리자 다이아 수정 리스너 ---
+  useEffect(() => {
+    const handlePointUpdate = (e) => {
+      if (user && e.detail && e.detail.userId === user.id) {
+        updatePointWithAnim(e.detail.point);
+      }
+    };
+    window.addEventListener("user_point_update", handlePointUpdate);
+    return () => window.removeEventListener("user_point_update", handlePointUpdate);
+  }, [user, updatePointWithAnim]);
+
+  // --- 관리자 기록 수정 리스너 ---
+  useEffect(() => {
+    const handleHistoryUpdate = () => {
+      const saved = localStorage.getItem("event_total_history");
+      if (saved) setTotalHistory(JSON.parse(saved));
+    };
+    window.addEventListener("event_history_update", handleHistoryUpdate);
+    return () => window.removeEventListener("event_history_update", handleHistoryUpdate);
+  }, []);
+
+  // ★ [신규] 서버 시간 동기화
+  //   기기(PC/폰) 시계 차이로 회차가 어긋나는 문제 해결
+  //   mount 시 1회 + 5분마다 재sync
+  useEffect(() => {
+    if (!user?.id) return;
+    syncServerClock(user.id, true); // 강제 sync
+    const interval = setInterval(() => {
+      syncServerClock(user.id);
+    }, 5 * 60 * 1000); // 5분마다
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  // ★ [신규] 유저 본인 다이아 실시간 구독
+  //   관리자가 실시간 배팅 모니터링에서 배팅/잔액을 수정하면
+  //   Firestore users/{userId} 문서의 diamond가 즉시 갱신되고,
+  //   여기서 감지해서 로컬 UI(마이페이지·이벤트섹션)에 바로 반영.
+  //   ※ 무한 루프 방지를 위해 원격 값이 로컬과 다를 때만 업데이트
+  useEffect(() => {
+    if (!user?.id) return;
+    const userDocRef = doc(db, "users", user.id);
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+      if (!docSnap.exists()) return;
+      const remoteDiamond = docSnap.data()?.diamond;
+      if (typeof remoteDiamond !== "number") return;
+      // 정산 처리 중이면 스킵 (라운드 종료 중간에 덮어쓰지 않도록)
+      if (isProcessingRef.current) return;
+      // 로컬과 다르면 로컬 상태 갱신
+      if (remoteDiamond !== pointRef.current) {
+        console.log(`💎 원격 다이아 변경 감지: ${pointRef.current} → ${remoteDiamond}`);
+        pointRef.current = remoteDiamond;
+        updatePointWithAnim(remoteDiamond);
+      }
+    });
+    return () => unsubscribe();
+  }, [user?.id, updatePointWithAnim]);
+
+  // --- 관리자 과거 회차 조작 실시간 감지 리스너 ---
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const revisionQuery = query(
+      collection(db, "event_manipulation"),
+      where("isRevision", "==", true)
+    );
+
+    const unsubscribe = onSnapshot(revisionQuery, async (snapshot) => {
+      const changes = snapshot.docChanges();
+      
+      for (const change of changes) {
+        if (change.type === "added" || change.type === "modified") {
+          const revisedRound = parseInt(change.doc.id);
+          const data = change.doc.data();
+          const newWinners = data.winner || [];
+
+          console.log(`🔄 ${revisedRound}회차 결과 재정산 감지! 로컬 캐시 갱신 중...`);
+
+          const savedTotal = JSON.parse(localStorage.getItem("event_total_history") || "[]");
+          const updatedTotal = savedTotal.map(item => {
+            if (item.round === revisedRound) {
+              const winItems = newWinners.map(name => {
+                const config = ITEM_CONFIG.find(c => c.name === name);
+                return config ? `${config.icon} ${config.name}` : name;
+              });
+              return { ...item, winItems };
+            }
+            return item;
+          });
+
+          localStorage.setItem("event_total_history", JSON.stringify(updatedTotal));
+          setTotalHistory(updatedTotal);
+
+          const myHist = JSON.parse(localStorage.getItem(`event_my_history_${user?.id}`) || "[]");
+          const myUpdated = myHist.map(record => {
+            if (record.round === revisedRound) {
+              const winIcons = newWinners.map(name => {
+                const config = ITEM_CONFIG.find(c => c.name === name);
+                return config ? config.icon : "❓";
+              });
+              
+              const matchedCount = record.selected.filter(name => newWinners.includes(name)).length;
+              const newEarn = calcWinAmount(record.selected, matchedCount, record.cost);
+
+              return {
+                ...record,
+                winNames: newWinners,
+                winIcons,
+                earn: newEarn,
+                revised: true 
+              };
+            }
+            return record;
+          });
+
+          localStorage.setItem(`event_my_history_${user?.id}`, JSON.stringify(myUpdated));
+          setMyHistory(myUpdated);
+          // ★ [신규] 재정산된 기록도 Firebase에 최신화
+          for (const record of myUpdated.filter(r => r.round === revisedRound && r.revised)) {
+            try {
+              await addDoc(collection(db, "user_bet_history"), {
+                ...record,
+                userId: user?.id,
+                savedAt: new Date().toISOString(),
+              });
+            } catch (e) {
+              console.warn("재정산 Firebase 저장 실패:", e);
+            }
+          }
+
+          console.log(`✅ ${revisedRound}회차 로컬 캐시 갱신 완료`);
+        }
+      }
+    }, (error) => {
+      console.error("❌ 재정산 리스너 오류:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
+
+  // ⭐ [변경] 관리자 실시간 베팅 수정 감지 - 다중 베팅 대응
+  //   각 pending 베팅 docId마다 별도 리스너 구독. docId가 바뀌면 자동 재구독.
+  const pendingDocIdKey = useMemo(
+    () => (myPendingBets || []).map(b => b.docId).filter(Boolean).sort().join(','),
+    [myPendingBets]
+  );
+
+  useEffect(() => {
+    if (!myPendingBets || myPendingBets.length === 0) return;
+
+    const unsubscribers = myPendingBets
+      .filter(b => !!b.docId)
+      .map((bet) => {
+        const targetDocId = bet.docId;
+        const betDocRef = doc(db, "event_bets", targetDocId);
+
+        return onSnapshot(betDocRef, (docSnap) => {
+          if (!docSnap.exists()) return;
+          const data = docSnap.data();
+
+          setMyPendingBets(prev => {
+            if (!prev || prev.length === 0) return prev;
+
+            // ★ docId로 해당 베팅 찾기 (index 대신 docId 매칭이 더 안전)
+            const targetIndex = prev.findIndex(b => b.docId === targetDocId);
+            if (targetIndex === -1) return prev;
+
+            const currentBet = prev[targetIndex];
+            const isItemsChanged = JSON.stringify(currentBet.items) !== JSON.stringify(data.items);
+            const isAmountChanged = currentBet.totalCost !== data.betAmount;
+
+            if (isItemsChanged || isAmountChanged) {
+              const newItems = data.items || currentBet.items;
+              const newTotalCost = data.betAmount !== undefined ? data.betAmount : currentBet.totalCost;
+              const newPerAmount = newTotalCost / Math.max(1, newItems.length);
+
+              const updatedBet = {
+                ...currentBet,
+                items: newItems,
+                totalCost: newTotalCost,
+                perAmount: newPerAmount
+              };
+
+              const newArr = [...prev];
+              newArr[targetIndex] = updatedBet;
+
+              // 로컬 백업 최신화
+              betsRef.current = newArr;
+              localStorage.setItem(`pending_bets_${user?.id}`, JSON.stringify(newArr));
+              console.log(`🛠️ 관리자가 ${targetIndex + 1}번째 베팅을 실시간 수정:`, updatedBet);
+
+              return newArr;
+            }
+            return prev;
+          });
+        });
+      });
+
+    return () => {
+      unsubscribers.forEach(unsub => unsub && unsub());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDocIdKey, user?.id]);
+
+  // ★ [변경] 베팅 목록 전체 설정 - 배열 대응
+  const handleSetMyPendingBets = (bets) => {
+    const arr = Array.isArray(bets) ? bets : (bets ? [bets] : []);
+    betsRef.current = arr;
+    setMyPendingBets(arr);
+    if (arr.length > 0) {
+      localStorage.setItem(`pending_bets_${user?.id}`, JSON.stringify(arr));
+    } else {
+      localStorage.removeItem(`pending_bets_${user?.id}`);
+    }
+  };
+
+  // ★ [신규] 베팅 추가 - EventSection의 handleDonate에서 사용
+  //   기존 배열에 새 베팅을 push. MAX_BETS_PER_ROUND 초과 시 무시.
+  const addPendingBet = useCallback((bet) => {
+    if (!bet) return false;
+    const current = betsRef.current || [];
+    // ★ [버그 수정] 전체 배열이 아닌 해당 라운드의 베팅 수만 체크
+    //   surviving 로직으로 이전 라운드 베팅이 남아있을 수 있어서
+    //   전체 length로 체크하면 새 라운드 베팅이 막힐 수 있음
+    const currentRoundBets = current.filter(b => b.round === bet.round);
+    if (currentRoundBets.length >= MAX_BETS_PER_ROUND) {
+      console.warn("MAX_BETS_PER_ROUND 초과 - 추가 안 됨");
+      return false;
+    }
+    const next = [...current, bet];
+    betsRef.current = next;
+    setMyPendingBets(next);
+    localStorage.setItem(`pending_bets_${user?.id}`, JSON.stringify(next));
+    return true;
+  }, [user?.id]);
+
+  // --- 라운드 종료: 서버 연동 및 정산 처리 ---
+  //
+  // ★★★ [핵심 수정] 서버 중앙집중식 결과 결정 ★★★
+  //
+  //   이전 버그: 각 회원 브라우저가 자기 판단으로 결과를 결정 → 회원마다 결과 다름!
+  //   
+  //   시나리오 (버그 재현):
+  //     1. 회원 A: fixedResult 없음 → generateResult 실행 → ["틱톡"] 판정
+  //     2. 관리자: 결과 조작 → winner: ["인스타"]
+  //     3. 회원 B: fixedResult 있음 → ["인스타"] 사용
+  //     → 같은 회차인데 A와 B의 결과가 다름 😱
+  //   
+  //   수정 방식: "첫 종료자의 결과가 진리 (Source of Truth)"
+  //     1. Firestore의 game_history/{round} 확인
+  //     2. 이미 winner 있음 → 그거 사용 (다른 회원과 동일 결과 보장)
+  //     3. 없음 → 결과 계산 + 서버에 저장 (내가 첫 결정자)
+  //     4. 트랜잭션으로 원자적 처리 (동시성 안전)
+  const handleRoundEnd = useCallback(async (targetRound) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    
+    setGameState(prev => ({ ...prev, isDrawing: true, timeLeft: 0 }));
+    soundManager.play("draw");
+
+    const shuffleInterval = setInterval(() => {
+      const randomIcons = EventService.generateResult(Math.random()).map(i => i.icon);
+      setDrawingItems(randomIcons);
+    }, 120);
+
+    // ★ [사전 조회] fixedResult (관리자 조작) - 트랜잭션 밖에서 조회
+    //   트랜잭션 내부에서는 tx.get()만 써야 하므로 여기서 미리 준비
+    const fixedResult = await EventService.getFixedResult(targetRound);
+
+    // ★★★ [중앙집중식 결과 결정] 트랜잭션으로 원자 처리 ★★★
+    //   우선순위 (매우 중요!):
+    //     1. fixedResult (관리자 조작) → 항상 최우선!
+    //        관리자가 조작한 결과는 무조건 반영되어야 함
+    //     2. game_history (다른 회원이 이미 저장한 결과) → 그 다음
+    //        조작 없을 때만 첫 결정자 결과 유지
+    //     3. generateResult (알고리즘 계산) → 마지막 fallback
+    //   
+    //   → 관리자 조작 → 자동으로 game_history 덮어쓰기 (다른 회원도 조작 결과 참조)
+    let winNames = null;
+    try {
+      await runTransaction(db, async (tx) => {
+        const historyRef = doc(db, "game_history", String(targetRound));
+        const historySnap = await tx.get(historyRef);
+        const historyWinner = historySnap.exists() && Array.isArray(historySnap.data().winner) 
+          ? historySnap.data().winner 
+          : null;
+
+        if (fixedResult && fixedResult.length > 0) {
+          // ★★★ 1순위: 관리자 조작 → 항상 최우선 (game_history 덮어쓰기)
+          winNames = fixedResult.map(i => i.name);
+          
+          // 기존 game_history가 다르면 강제 덮어쓰기 → 다른 회원도 관리자 결과 참조
+          const isDifferent = !historyWinner || 
+            JSON.stringify([...historyWinner].sort()) !== JSON.stringify([...winNames].sort());
+          
+          if (isDifferent) {
+            tx.set(historyRef, {
+              round: targetRound,
+              winner: winNames,
+              overriddenByAdmin: true,
+              overriddenAt: new Date().toISOString(),
+            }, { merge: true });
+            console.log(`⚡ ${targetRound}회차 관리자 조작 결과 적용 + game_history 덮어씀:`, winNames);
+          } else {
+            console.log(`✅ ${targetRound}회차 관리자 조작 결과 (game_history 이미 동일):`, winNames);
+          }
+        } else if (historyWinner && historyWinner.length > 0) {
+          // ★ 2순위: 다른 회원이 저장한 결과 사용 (조작 없음)
+          winNames = historyWinner;
+          console.log(`✅ ${targetRound}회차 결과 서버 로드 (다른 회원 결정):`, winNames);
+        } else {
+          // ★ 3순위: 첫 결정자 → generateResult로 계산 + 저장
+          const winObjs = EventService.generateResult(targetRound);
+          winNames = winObjs.map(i => i.name);
+          tx.set(historyRef, {
+            round: targetRound,
+            winner: winNames,
+            firstDecidedBy: user?.id || "unknown",
+            firstDecidedAt: new Date().toISOString(),
+          }, { merge: true });
+          console.log(`✅ ${targetRound}회차 첫 결정 (generateResult):`, winNames);
+        }
+      });
+    } catch (e) {
+      // 트랜잭션 실패 시 fallback (최악의 경우 로컬 계산)
+      console.error("game_history 트랜잭션 실패, 로컬 fallback:", e);
+      const winObjs = fixedResult || EventService.generateResult(targetRound);
+      winNames = winObjs.map(i => i.name);
+    }
+
+    // ★ winNames로부터 winObjs 재구성 (아이콘, 색상 등 UI 정보 포함)
+    const winObjs = winNames.map(name => ITEM_CONFIG.find(i => i.name === name)).filter(Boolean);
+
+    setTimeout(async () => {
+      clearInterval(shuffleInterval);
+      
+      const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+      
+      setDrawingItems(winObjs.map(v => v.icon));
+      setImpactTick(t => t + 1);
+      soundManager.play("impact");
+      if (navigator.vibrate) navigator.vibrate(80);
+      
+      setTotalHistory(prev => {
+        const newHistoryItem = { 
+          round: targetRound, 
+          winItems: winObjs.map(v => `${v.icon} ${v.name}`), 
+          date: currentTime 
+        };
+        const updated = [newHistoryItem, ...prev].slice(0, 50);
+        localStorage.setItem("event_total_history", JSON.stringify(updated));
+        return updated;
+      });
+
+      // ★ [수정] winner는 이미 트랜잭션에서 저장됨. 여기선 UI용 부가 정보만 merge
+      //   (winItems, date, savedAt 등 - 첫 결정자만 실질적으로 저장)
+      try {
+        setDoc(doc(db, "game_history", String(targetRound)), {
+          round: targetRound,
+          winItems: winObjs.map(v => `${v.icon} ${v.name}`),
+          date: currentTime,
+          savedAt: new Date().toISOString()
+        }, { merge: true }).catch(err => {
+          console.error("game_history 부가정보 저장 실패:", err);
+        });
+      } catch (e) {
+        console.error("game_history 저장 오류:", e);
+      }
+
+      // ★ [변경] 다중 베팅 정산 - 해당 라운드의 모든 베팅 처리
+      const activeBets = (betsRef.current || []).filter(b => b.round === targetRound);
+
+      if (activeBets.length > 0) {
+        let totalWinAmount = 0;
+        let totalBetCost = 0;
+        const details = []; // 각 베팅별 결과 상세
+
+        // 각 베팅 개별 정산
+        for (const bet of activeBets) {
+          const { items, totalCost } = bet;
+          const matchedCount = items.filter(name => winNames.includes(name)).length;
+          const winAmount = calcWinAmount(items, matchedCount, totalCost);
+
+          totalWinAmount += winAmount;
+          totalBetCost += totalCost;
+
+          details.push({
+            items: [...items],
+            totalCost,
+            winAmount,
+            isWin: winAmount > 0,
+          });
+
+          // 히스토리에 각 베팅 개별 기록 (Firebase + localStorage 동시 저장)
+          saveMyHistoryRecord({
+            round: targetRound, selected: [...items], winNames, winIcons: winObjs.map(i => i.icon),
+            earn: winAmount, cost: totalCost, date: currentTime
+          });
+        }
+
+        // ★ 총합 기준 승/패 판정 (총 지급액 > 0 이면 승리)
+        const isSuccess = totalWinAmount > 0;
+
+        setTimeout(async () => {
+          if (isSuccess) { 
+            soundManager.play("win");
+            if (navigator.vibrate) navigator.vibrate([100, 50, 150]); 
+          } else if (totalBetCost > 0) { 
+            soundManager.play("lose");
+          }
+
+          // ★★★ [핵심 수정] pointRef.current는 로컬 값이라 Firebase와 어긋날 수 있음
+          //   → 정산 도중 다른 베팅/충전이 있으면 balanceAtEnd가 잘못 계산됨
+          //   → Firebase에서 실제 최신 잔액을 서버에서 직접 조회 (캐시 우회)
+          //
+          //   시나리오 (버그 재현):
+          //     Firebase 실제 잔액 = 173,556
+          //     pointRef.current = 73,556 (동기화 지연으로 100,000 안 반영)
+          //     newPoint = 73,556 - 160,000 + 0 = -86,444 ❌ (실제: 13,556)
+          //   → Firebase에서 실제 잔액 173,556 조회 → newPoint = 13,556 ✅
+          let actualBalance;
+          try {
+            const userSnap = await getDocFromServer(doc(db, "users", user.id));
+            actualBalance = (userSnap.data()?.diamond ?? pointRef.current) + 0;
+            // Firebase의 diamond는 베팅 시 이미 차감된 값 (트랜잭션 반영됨)
+          } catch (e) {
+            console.warn("정산 시점 실제 잔액 조회 실패, pointRef로 폴백:", e);
+            actualBalance = pointRef.current - totalBetCost; // 폴백: 로컬 계산
+          }
+          
+          // ★ [수정] Firebase 실제 잔액 + 승리액 = 최종 잔액
+          //   Firebase는 베팅 시 이미 차감됐으므로 승리액만 더함
+          const newPoint = actualBalance + totalWinAmount;
+          updatePointWithAnim(newPoint);
+          syncDiamondDelta(totalWinAmount);
+          pointRef.current = newPoint;
+
+          // ★ [신규] 각 event_bets 문서에 win + balanceAtEnd 기록
+          //   자연 종료 정산도 관리자 SponsorshipsView와 같은 데이터 형식으로 남게 됨
+          //   → 관리자 모니터링에서 "진행중"이 아닌 "승리/패배"로 올바르게 표시
+          //
+          //   중요: 각 베팅의 balanceAtEnd = 그 베팅 정산 이후 유저의 잔액
+          //   여러 개 베팅이면 순차적으로 누적 계산
+          //   ★ [수정] Firebase 실제 잔액(actualBalance) 기준으로 정확한 balanceAtEnd 계산
+          let runningBalance = actualBalance; // 정산 전(베팅 차감 후) Firebase 실제 잔액
+          const nowIso = new Date().toISOString();
+
+          // ★ [재시도 헬퍼] event_bets win 저장이 실패하면 "(추정)" 딱지가 남음
+          //   → 인터넷 끊김 등으로 실패해도 자동 재시도해서 확실히 저장
+          //   → 200ms 간격으로 빠르게 최대 4번 재시도 (기존: 1-2-4초 지수 백오프)
+          const saveBetWithRetry = async (docId, data) => {
+            const maxRetries = 4;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+              try {
+                await updateDoc(doc(db, "event_bets", docId), data);
+                return; // 성공
+              } catch (err) {
+                console.warn(`event_bets 저장 실패 (${docId}, 시도 ${attempt + 1}/${maxRetries}):`, err.message);
+                if (attempt < maxRetries - 1) {
+                  // ★ [수정] 200ms 짧은 딜레이로 즉시 재시도
+                  await new Promise(r => setTimeout(r, 200));
+                } else {
+                  console.error(`event_bets 최종 실패 (${docId}) - Worker가 백업 정산 예정:`, err);
+                }
+              }
+            }
+          };
+
+          for (const bet of activeBets) {
+            if (!bet.docId) continue;
+            const betItems = bet.items || [];
+            const matchedCount = betItems.filter(name => winNames.includes(name)).length;
+            const winAmount = calcWinAmount(betItems, matchedCount, bet.totalCost || 0);
+            runningBalance += winAmount; // 이 베팅 지급액 반영
+            const isWin = winAmount > 0;
+            // ★ 재시도 로직으로 저장 (await 안 하고 백그라운드 실행 - UI 안 막음)
+            saveBetWithRetry(bet.docId, {
+              win: isWin,
+              balanceAtEnd: runningBalance,
+              balanceAtEndAt: nowIso,
+            });
+          }
+          
+          setShowResult({ 
+            winItems: winObjs.map(v => `${v.icon} ${v.name}`), 
+            winAmount: totalWinAmount, 
+            betTotal: totalBetCost, 
+            isWin: isSuccess,
+            // ★ [신규] 다중 베팅 상세 - EventSection에서 각 베팅 결과 개별 표시용
+            details,
+            betCount: activeBets.length,
+          });
+        }, 100); // ★ [수정] 800 → 100ms (사운드 딜레이 최소화)
+      }
+
+      setTimeout(() => {
+        // ★ [버그 수정] 정산 완료된 라운드의 베팅만 제거, 다음 라운드 베팅은 유지
+        //   기존: handleSetMyPendingBets([]) → 전체 삭제 → 정산 중 넣은 다음 라운드 베팅도 소실!
+        //   수정: targetRound 이하 베팅만 제거, 이후 라운드 베팅은 보존
+        const surviving = (betsRef.current || []).filter(b => b.round > targetRound);
+        handleSetMyPendingBets(surviving);
+        isProcessingRef.current = false;
+      }, 400); // ★ [수정] 2600 → 400ms (정산 후 정리 딜레이 대폭 축소)
+
+    }, 300); // ★ [수정] 3000 → 300ms (셔플 애니메이션 대폭 축소, 결과 즉시 표시)
+  }, [user?.id, updatePointWithAnim, syncDiamondToFirestore, syncDiamondDelta]);
+
+  // --- 시간 동기화 루프 ---
+  useEffect(() => {
+    const tick = () => {
+      const { round, timeLeft, isDrawingPhase } = EventService.getCurrentRoundInfo();
+      if (roundRef.current !== 0 && round > roundRef.current && !isProcessingRef.current) {
+        handleRoundEnd(roundRef.current); 
+      }
+      roundRef.current = round; 
+      setGameState(prev => {
+        if (isProcessingRef.current) return prev; 
+        if (prev.round !== round || prev.timeLeft !== timeLeft) {
+          return { round, timeLeft, isDrawing: isDrawingPhase };
+        }
+        return prev;
+      });
+    };
+    const interval = setInterval(tick, 1000);
+    tick(); 
+    return () => clearInterval(interval);
+  }, [handleRoundEnd]);
+
+  // --- 라이브 알림 생성기 ---
+  useEffect(() => {
+    // 언어 감지 (localStorage)
+    const currentLang = (typeof window !== "undefined" && localStorage.getItem("lang")) || "ko";
+    
+    const generateRandomUser = () => {
+      const type = Math.random();
+      if (type < 0.3) {
+        if (currentLang === "ja") {
+          // 일본 이름 (성+*+이름)
+          const f = ["田中", "佐藤", "鈴木", "高橋", "伊藤", "渡辺", "山本", "中村", "小林", "加藤", "吉田", "山田"];
+          const l = ["太", "健", "翔", "真", "大", "誠", "亮", "陽", "拓", "海", "光", "空"];
+          return `${f[Math.floor(Math.random()*f.length)]}*${l[Math.floor(Math.random()*l.length)]}`;
+        } else if (currentLang === "en") {
+          const f = ["Mr.", "Ms.", "Dr."];
+          const l = ["Kim", "Park", "Lee", "Choi", "Jung", "Ko", "Yoon", "Ha"];
+          return `${f[Math.floor(Math.random()*f.length)]}${l[Math.floor(Math.random()*l.length)]}`;
+        } else {
+          const f = ["김", "이", "박", "최", "정", "강", "조", "윤", "장", "임", "한", "오", "서", "신"];
+          const l = ["수", "진", "영", "호", "민", "훈", "우", "석", "준", "현", "철", "미"];
+          return `${f[Math.floor(Math.random()*f.length)]}*${l[Math.floor(Math.random()*l.length)]}`;
+        }
+      } else if (type < 0.6) {
+        // 전화번호 - 언어별 형식
+        if (currentLang === "ja") return `090-****-${Math.floor(1000 + Math.random() * 8999)}`;
+        if (currentLang === "en") return `+82-1**-***-${Math.floor(1000 + Math.random() * 8999)}`;
+        return `010-****-${Math.floor(1000 + Math.random() * 8999)}`;
+      } else {
+        const pre = ["Super", "King", "God", "Win", "Lucky"];
+        return `${pre[Math.floor(Math.random()*pre.length)]}${Math.floor(Math.random()*999)}`;
+      }
+    };
+    // 3개 언어 지원 - 위에서 선언한 currentLang 재사용
+    const messagesByLang = {
+      ko: ["대박 당첨!", "적중 성공!", "수익 실현!", "축하합니다!", "배당금 획득!"],
+      ja: ["大当たり!", "的中成功!", "収益実現!", "おめでとう!", "配当金獲得!"],
+      en: ["JACKPOT!", "WINNER!", "PROFIT!", "CONGRATS!", "PAYOUT WIN!"]
+    };
+    const messages = messagesByLang[currentLang] || messagesByLang.ko;
+    // ★ [수정] 티커 알림에 이미지 경로 대신 이모지 사용
+    //   기존: `${rItem.icon}` → "/icons/kakao.png" 이 그대로 문자열로 뿌려짐
+    //   수정: 아이템 이름별로 브랜드 이모지 매핑
+    const iconEmoji = {
+      "인스타": "📸",
+      "카카오": "💛",
+      "틱톡": "🎵",
+      "유튜브": "🎬"
+    };
+    const notiTimer = setInterval(() => {
+      const rName = generateRandomUser();
+      const rItem = ITEM_CONFIG[Math.floor(Math.random() * ITEM_CONFIG.length)];
+      const rMsg = messages[Math.floor(Math.random() * messages.length)];
+      const emoji = iconEmoji[rItem.name] || "🎁";
+      // 언어별 조사
+      const particle = currentLang === "ko" ? "님이" : currentLang === "ja" ? "さんが" : "";
+      const itemName = currentLang === "ja" ? (rItem.nameJa || rItem.nameEn) : currentLang === "en" ? rItem.nameEn : rItem.name;
+      setLiveNoti(`${rName}${particle} ${emoji} ${itemName} ${rMsg}`);
+    }, 6000 + Math.random() * 4000);
+    return () => clearInterval(notiTimer);
+  }, []);
+
+  const stats = useMemo(() => EventService.calculateStats(totalHistory), [totalHistory]);
+
+  return {
+    round: gameState.round,
+    timeLeft: gameState.timeLeft,
+    isDrawing: gameState.isDrawing || isProcessingRef.current, 
+    drawingItems,
+    totalHistory,
+    myHistory,
+    // ★ [변경] myPendingBet → myPendingBets (배열)
+    myPendingBets,
+    // ★ [신규] 새 베팅 추가 함수 - EventSection에서 handleDonate 시 사용
+    addPendingBet,
+    // 배열 전체 리셋용 (외부에서 필요시)
+    setMyPendingBets: handleSetMyPendingBets,
+    showResult,
+    setShowResult,
+    liveNoti,
+    stats,
+    impactTick,
+    updatePointWithAnim,
+    syncDiamondToFirestore,
+    // ★ [신규] 최대 베팅 회수 export
+    maxBetsPerRound: MAX_BETS_PER_ROUND,
+    // ★ [신규] 후원기록 Firebase+로컬 동시 저장 (외부 컴포넌트에서 필요시 사용)
+    saveMyHistoryRecord,
+  };
+}
