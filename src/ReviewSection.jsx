@@ -296,15 +296,7 @@ export default function ReviewSection({
         </div>
       )}
 
-      {/* ===== 플로팅 상담 버튼 (우측 하단 고정) ===== */}
-      <button 
-        style={r.floatingConsult}
-        onClick={() => handleConsult()}
-        className="pulse-btn"
-        aria-label="상담 연결"
-      >
-        💬
-      </button>
+      {/* ★ [제거됨] 플로팅 상담 버튼 → Sales Smartly 문의하기 위젯과 중복이라 제거 */}
 
       {/* ===== 플로팅 작성 버튼 (좌측 하단 고정) ===== */}
       <button 
