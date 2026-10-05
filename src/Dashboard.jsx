@@ -292,9 +292,29 @@ export default function Dashboard({
     window.history.pushState({ isDetail: true }, ''); 
   };
 
+  // ★ [변경] Sales Smartly 채팅 위젯 열기 (텔레그램 → 사이트 내 채팅)
   const handleTelegram = () => {
-    if (telegramLink) window.open(telegramLink, "_blank");
-    else alert(lang === "ko" ? "상담 링크가 설정되지 않았습니다." : lang === "ja" ? "相談リンクが設定されていません。" : "Link not set.");
+    try {
+      // Sales Smartly 공식 API로 채팅창 열기
+      if (window.SSQ && typeof window.SSQ.openChat === 'function') {
+        window.SSQ.openChat();
+        return;
+      }
+      // 폴백: 채팅 버튼 자동 클릭
+      const chatBtn = document.querySelector('[class*="salesmartly"]') 
+        || document.querySelector('#SSQ-container')
+        || document.querySelector('iframe[src*="salesmartly"]');
+      if (chatBtn) {
+        chatBtn.click();
+        return;
+      }
+      // 최종 폴백: 텔레그램
+      if (telegramLink) window.open(telegramLink, "_blank");
+      else alert(lang === "ko" ? "채팅을 준비 중입니다." : lang === "ja" ? "チャットを準備中です。" : "Chat loading...");
+    } catch (e) {
+      console.warn("Sales Smartly open failed:", e);
+      if (telegramLink) window.open(telegramLink, "_blank");
+    }
   };
 
   useEffect(() => { window.scrollTo(0, 0); }, [activeTab]);

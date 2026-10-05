@@ -172,15 +172,32 @@ export default function ReviewSection({
     }
   }, [reviews, user]);
 
-  // ★ Sales Smartly 상담 연결 (텔레봇)
+  // ★ Sales Smartly 채팅 위젯 열기 (사이트 내 채팅창)
   const handleConsult = useCallback((extraInfo = "") => {
-    if (!telegramLink) {
-      alert(tr("상담 링크가 준비 중입니다.", "相談リンクを準備中です。", "Consultation link not ready."));
-      return;
+    try {
+      // Sales Smartly 공식 API로 채팅창 열기
+      if (window.SSQ && typeof window.SSQ.openChat === 'function') {
+        window.SSQ.openChat();
+        return;
+      }
+      // 폴백: 채팅 버튼 자동 클릭
+      const chatBtn = document.querySelector('[class*="salesmartly"]')
+        || document.querySelector('#SSQ-container')
+        || document.querySelector('iframe[src*="salesmartly"]');
+      if (chatBtn) {
+        chatBtn.click();
+        return;
+      }
+      // 최종 폴백: 텔레그램
+      if (telegramLink) {
+        window.open(telegramLink, "_blank");
+      } else {
+        alert(tr("채팅을 준비 중입니다.", "チャットを準備中です。", "Chat loading..."));
+      }
+    } catch (e) {
+      console.warn("Sales Smartly open failed:", e);
+      if (telegramLink) window.open(telegramLink, "_blank");
     }
-    // Admin에서 설정한 텔레링크 사용
-    // Sales Smartly가 백엔드에서 자동 분배 처리
-    window.open(telegramLink, "_blank");
   }, [telegramLink, isKo, isJa]);
 
   return (
