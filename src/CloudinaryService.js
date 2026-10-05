@@ -72,3 +72,66 @@ export async function uploadToCloudinary(file) {
 
   return data.secure_url;
 }
+
+
+// =========================================================================
+// 🎬 generateVideoThumbnail - 영상 파일에서 대표 장면 1장을 JPG 파일로 추출
+// -------------------------------------------------------------------------
+// - 브라우저(canvas)에서만 처리 → 서버/추가 비용 없음
+// - 실패하면 null 반환 (후기 등록 자체는 막지 않음)
+// - 반환된 File은 uploadToCloudinary(file)로 바로 업로드 가능
+// =========================================================================
+export function generateVideoThumbnail(file, { maxWidth = 720, quality = 0.8, timeoutMs = 12000 } = {}) {
+  return new Promise((resolve) => {
+    if (!file || typeof document === "undefined") return resolve(null);
+
+    let done = false;
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { video.removeAttribute("src"); video.load(); } catch (_) {}
+      URL.revokeObjectURL(objectUrl);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+
+    video.onerror = () => finish(null);
+
+    video.onloadedmetadata = () => {
+      const d = video.duration;
+      // 영상 앞부분(최대 1초)에서 장면 추출 - 검은 첫 프레임 회피
+      const t = isFinite(d) && d > 0 ? Math.min(1, d * 0.1) : 0.1;
+      try { video.currentTime = t || 0.1; } catch (_) { finish(null); }
+    };
+
+    video.onseeked = () => {
+      try {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (!w || !h) return finish(null);
+        const scale = Math.min(1, maxWidth / w);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(
+          (blob) => finish(blob ? new File([blob], "thumbnail.jpg", { type: "image/jpeg" }) : null),
+          "image/jpeg",
+          quality
+        );
+      } catch (_) {
+        finish(null);
+      }
+    };
+
+    video.src = objectUrl;
+  });
+}

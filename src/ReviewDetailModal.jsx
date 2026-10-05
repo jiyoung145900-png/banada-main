@@ -181,6 +181,7 @@ export default function ReviewDetailModal({
             {isVideo ? (
               <video 
                 src={review.mediaUrl} 
+                poster={review.thumbnailUrl || undefined}
                 style={d.mediaEl}
                 controls
                 autoPlay

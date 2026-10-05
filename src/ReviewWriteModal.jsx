@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from "react";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, authReady } from "./firebase";
-import { uploadToCloudinary } from "./CloudinaryService";
+import { uploadToCloudinary, generateVideoThumbnail } from "./CloudinaryService";
 import { uploadToR2, isVideoFile } from "./R2Service";
 
 export default function ReviewWriteModal({ 
@@ -120,7 +120,15 @@ export default function ReviewWriteModal({
 
       // 1. 파일 업로드 (자동 분기: 영상=R2, 사진=Cloudinary)
       let mediaUrl;
+      let thumbnailUrl = null;
       if (isVideoFile(mediaFile)) {
+        // 썸네일 먼저 생성 (실패해도 후기 등록은 계속 진행)
+        try {
+          const thumbFile = await generateVideoThumbnail(mediaFile);
+          if (thumbFile) thumbnailUrl = await uploadToCloudinary(thumbFile);
+        } catch (thumbErr) {
+          console.warn("썸네일 생성/업로드 실패 (영상만 등록):", thumbErr);
+        }
         mediaUrl = await uploadToR2(mediaFile, (percent) => {
           setUploadProgress(percent);
         });
@@ -136,6 +144,7 @@ export default function ReviewWriteModal({
         userId: user.id,
         userNickname: user.nickname || user.name || user.id,
         mediaUrl,
+        thumbnailUrl, // ★ 영상일 때만 값 있음 (사진은 null)
         mediaType: isVideoFile(mediaFile) ? "video" : "image",
         region,
         loc: loc || region,

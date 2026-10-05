@@ -553,11 +553,12 @@ function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult
         {isVideo ? (
           <div style={r.videoWrap}>
             <video 
-              src={review.mediaUrl} 
+              src={review.thumbnailUrl ? review.mediaUrl : `${review.mediaUrl}#t=0.5`}
+              poster={review.thumbnailUrl || undefined}
               style={r.mediaEl}
               muted
               playsInline
-              preload="metadata"
+              preload={review.thumbnailUrl ? "none" : "metadata"}
             />
             <div style={r.videoPlayIcon}>▶</div>
           </div>
