@@ -1,66 +1,85 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import { db, authReady } from "./firebase";
+import { maskNickname } from "./nicknameUtils";
 
-const LEFT_TAGS = ["BANADA VIP", "PURE LUXURY", "SWEET BLOOM", "GOLDEN CLASS", "ELITE SELECT"];
-
-// ★ 지역명 번역 매핑 (ManagerSection과 동일)
-const LOC_MAP = {
-  "강남/서초/송파": { ja: "江南/瑞草/松坡", en: "Gangnam/Seocho/Songpa" },
-  "강동/광진/성동": { ja: "江東/広津/城東", en: "Gangdong/Gwangjin/Seongdong" },
-  "마포/강서/양천": { ja: "麻浦/江西/陽川", en: "Mapo/Gangseo/Yangcheon" },
-  "영등포/구로/금천": { ja: "永登浦/九老/衿川", en: "Yeongdeungpo/Guro/Geumcheon" },
-  "종로/중구/용산": { ja: "鍾路/中区/龍山", en: "Jongno/Jung-gu/Yongsan" },
-  "동대문/중랑/노원": { ja: "東大門/中浪/蘆原", en: "Dongdaemun/Jungnang/Nowon" },
-  "일산/파주/고양": { ja: "一山/坡州/高陽", en: "Ilsan/Paju/Goyang" },
-  "의정부/양주/동두천": { ja: "議政府/楊州/東豆川", en: "Uijeongbu/Yangju/Dongducheon" },
-  "남양주/구리/포천": { ja: "南楊州/九里/抱川", en: "Namyangju/Guri/Pocheon" },
-  "수원/용인/화성": { ja: "水原/龍仁/華城", en: "Suwon/Yongin/Hwaseong" },
-  "분당/판교/성남": { ja: "盆唐/板橋/城南", en: "Bundang/Pangyo/Seongnam" },
-  "안양/군포/의왕": { ja: "安養/軍浦/義王", en: "Anyang/Gunpo/Uiwang" },
-  "안산/시흥/광명": { ja: "安山/始興/光明", en: "Ansan/Siheung/Gwangmyeong" },
-  "부천/김포": { ja: "富川/金浦", en: "Bucheon/Gimpo" },
-  "평택/안성/오산": { ja: "平澤/安城/烏山", en: "Pyeongtaek/Anseong/Osan" },
-  "부평/계양": { ja: "富平/桂陽", en: "Bupyeong/Gyeyang" },
-  "미추홀/연수/남동": { ja: "弥鄒忽/延寿/南洞", en: "Michuhol/Yeonsu/Namdong" },
-  "서구/강화/옹진": { ja: "西区/江華/甕津", en: "Seo-gu/Ganghwa/Ongjin" },
-  "천안/아산/당진": { ja: "天安/牙山/唐津", en: "Cheonan/Asan/Dangjin" },
-  "대전/세종/공주": { ja: "大田/世宗/公州", en: "Daejeon/Sejong/Gongju" },
-  "청주/충주/음성": { ja: "清州/忠州/陰城", en: "Cheongju/Chungju/Eumseong" },
-  "춘천/홍천/철원": { ja: "春川/洪川/鉄原", en: "Chuncheon/Hongcheon/Cheorwon" },
-  "원주/횡성/평창": { ja: "原州/横城/平昌", en: "Wonju/Hoengseong/Pyeongchang" },
-  "강릉/속초/동해": { ja: "江陵/束草/東海", en: "Gangneung/Sokcho/Donghae" },
-  "광주/나주/담양": { ja: "光州/羅州/潭陽", en: "Gwangju/Naju/Damyang" },
-  "전주/익산/군산": { ja: "全州/益山/群山", en: "Jeonju/Iksan/Gunsan" },
-  "목포/무안/영암": { ja: "木浦/務安/霊岩", en: "Mokpo/Muan/Yeongam" },
-  "순천/여수/광양": { ja: "順天/麗水/光陽", en: "Suncheon/Yeosu/Gwangyang" },
-  "대구 시내/수성/동구": { ja: "大邱市内/寿城/東区", en: "Daegu/Suseong/Dong-gu" },
-  "대구 서구/남구/달서": { ja: "大邱西区/南区/達西", en: "Daegu Seo/Nam/Dalseo" },
-  "포항/경주/영덕": { ja: "浦項/慶州/盈徳", en: "Pohang/Gyeongju/Yeongdeok" },
-  "구미/김천/상주": { ja: "亀尾/金泉/尚州", en: "Gumi/Gimcheon/Sangju" },
-  "안동/영주/경산": { ja: "安東/栄州/慶山", en: "Andong/Yeongju/Gyeongsan" },
-  "부산 서면/동래/연제": { ja: "釜山西面/東莱/蓮堤", en: "Busan Seomyeon/Dongnae/Yeonje" },
-  "부산 해운대/수영/기장": { ja: "海雲台/水営/機張", en: "Haeundae/Suyeong/Gijang" },
-  "부산 사하/강서/사상": { ja: "沙下/江西/沙上", en: "Saha/Gangseo/Sasang" },
-  "울산/양산": { ja: "蔚山/梁山", en: "Ulsan/Yangsan" },
-  "창원/김해/거제": { ja: "昌原/金海/巨済", en: "Changwon/Gimhae/Geoje" },
-  "제주시 권역": { ja: "済州市エリア", en: "Jeju City Area" },
-  "서귀포시 권역": { ja: "西帰浦市エリア", en: "Seogwipo Area" },
+// ★ 지역명 번역 (후기 미리보기용)
+const REGION_TRANSLATION = {
+  "서울": { ja: "ソウル", en: "Seoul" },
+  "경기 북부": { ja: "京畿北部", en: "Gyeonggi N." },
+  "경기 남부": { ja: "京畿南部", en: "Gyeonggi S." },
+  "인천": { ja: "仁川", en: "Incheon" },
+  "충청": { ja: "忠清", en: "Chungcheong" },
+  "강원": { ja: "江原", en: "Gangwon" },
+  "전라": { ja: "全羅", en: "Jeolla" },
+  "경북·대구": { ja: "慶北·大邱", en: "Daegu/GB" },
+  "부산·울산·경남": { ja: "釜山·蔚山·慶南", en: "Busan/GN" },
+  "제주": { ja: "済州", en: "Jeju" },
 };
 
+// ★ 스크롤 시 부드럽게 나타나는 래퍼 (IntersectionObserver 없으면 즉시 표시)
+function Reveal({ children, delay = 0 }) {
+  const ref = useRef(null);
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setShow(true);
+      return;
+    }
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setShow(true);
+        io.disconnect();
+      }
+    }, { threshold: 0.1 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        opacity: show ? 1 : 0,
+        transform: show ? "translateY(0)" : "translateY(18px)",
+        transition: `opacity 0.7s ease ${delay}ms, transform 0.7s ease ${delay}ms`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ★ 골드 구분선
+function GoldDivider() {
+  return (
+    <div style={h.divider}>
+      <span style={h.dividerLine} />
+      <span style={h.dividerIcon}>✦</span>
+      <span style={{ ...h.dividerLine, transform: "scaleX(-1)" }} />
+    </div>
+  );
+}
+
 export default function HomeSection({
-  members = [],
   slideImages = [],
   innerLogo,
   topAdImage,
   topAdImage2,
   handleTelegram,
   setActiveTab,
-  openDetail,
   matchingCount = 0,
-  noticeText = "",
   t,
 }) {
   const [currentSlide, setCurrentSlide] = useState(0);
-  const scrollRef = useRef(null);
+  const [reviews, setReviews] = useState([]);
+
+  // ★ 언어 헬퍼
+  const isKo = t.home === "홈페이지";
+  const isJa = t.home === "ホーム";
+  const tr = (ko, ja, en) => (isKo ? ko : isJa ? ja : en);
 
   useEffect(() => {
     if (!slideImages || slideImages.length <= 1) return;
@@ -70,66 +89,54 @@ export default function HomeSection({
     return () => clearInterval(timer);
   }, [slideImages]);
 
-  // ★ [수정] 무한 캐러셀용: 정확히 2배 복제 (translateX(-50%)로 완벽 무한 루프)
-  const loopMembers = useMemo(() => {
-    if (!members || members.length === 0) return [];
-    return [...members, ...members];
-  }, [members]);
+  // ★ 실제 후기 미리보기: 최신 후기 중 평점 4 이상, 내용 있는 것 2개
+  useEffect(() => {
+    let cancelled = false;
+    authReady.then(async () => {
+      try {
+        const q = query(collection(db, "reviews"), orderBy("createdAt", "desc"), limit(12));
+        const snap = await getDocs(q);
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((rv) => (rv.rating || 0) >= 4 && (rv.content || "").trim().length >= 10)
+          .slice(0, 2);
+        if (!cancelled) setReviews(list);
+      } catch (e) {
+        console.warn("홈 후기 미리보기 로드 실패:", e);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
-  // ★ 언어 헬퍼
-  const isKo = t.home === "홈페이지";
-  const isJa = t.home === "ホーム";
-  const tr = (ko, ja, en) => isKo ? ko : isJa ? ja : en;
-  
-  const getMemberName = (member) => {
-    if (!member) return "";
-    if (isJa) return member.name_ja || member.name;
-    if (!isKo) return member.name_en || member.name;
-    return member.name_ko || member.name;
-  };
-  
-  const getLocName = (loc) => {
-    if (!loc) return "";
-    if (isKo) return loc;
-    const mapped = LOC_MAP[loc];
-    if (!mapped) return loc;
-    return isJa ? mapped.ja : mapped.en;
-  };
-
-  const scrollByButton = (direction) => {
-    if (scrollRef.current) {
-      const scrollAmount = 300; 
-      scrollRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      });
-    }
+  const getRegionName = (name) => {
+    if (!name) return "";
+    const first = name.split("/")[0];
+    if (isKo) return first;
+    const r = REGION_TRANSLATION[name] || REGION_TRANSLATION[first];
+    return r ? (isJa ? r.ja : r.en) : first;
   };
 
-  const handleMouseDown = (e) => {
-    const slider = scrollRef.current;
-    if (!slider) return;
-    let isDown = true;
-    let startX = e.pageX - slider.offsetLeft;
-    let scrollLeft = slider.scrollLeft;
-
-    const handleMouseMove = (e) => {
-      if (!isDown) return;
-      e.preventDefault();
-      const x = e.pageX - slider.offsetLeft;
-      const walk = (x - startX) * 2;
-      slider.scrollLeft = scrollLeft - walk;
-    };
-
-    const handleMouseUp = () => {
-      isDown = false;
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  };
+  // ★ 서비스 카드 3개 (초안)
+  const serviceCards = [
+    {
+      icon: "♡",
+      title: tr("맞춤 매칭", "マッチング", "Tailored Match"),
+      sub: tr("나에게 맞는 인연", "理想のご縁を", "Find your fit"),
+      onClick: () => setActiveTab && setActiveTab("about"),
+    },
+    {
+      icon: "♕",
+      title: tr("프리미엄 회원", "プレミアム会員", "Premium Member"),
+      sub: tr("특별한 회원 혜택", "特別な会員特典", "Exclusive perks"),
+      onClick: () => setActiveTab && setActiveTab("about"),
+    },
+    {
+      icon: "✦",
+      title: tr("1:1 매니저 케어", "1:1ケア", "1:1 Care"),
+      sub: tr("전담 맞춤 상담", "専任のご相談", "Dedicated support"),
+      onClick: () => handleTelegram && handleTelegram(),
+    },
+  ];
 
   return (
     <div style={h.container}>
@@ -150,7 +157,6 @@ export default function HomeSection({
           )}
         </div>
 
-        {/* ===== ★ LIVE CONNECTED 배지 (로고 바로 밑) ===== */}
         <div style={h.statusBadge}>
           <div className="dot-pulse-wrap">
             <span className="dot-pulse" />
@@ -160,16 +166,16 @@ export default function HomeSection({
         </div>
       </header>
 
-      {/* ===== ★ INTRO TEXT (LIVE CONNECTED 밑) ===== */}
+      {/* ===== INTRO TEXT ===== */}
       <div style={h.introTextArea}>
         <div style={h.introSub}>WELCOME TO THE PRIVATE</div>
         <div style={h.introMain}>
-          {t.welcome.replace("📢 ", "")} 
+          {t.welcome.replace("📢 ", "")}
           <span style={h.introSparkle}>✦</span>
         </div>
       </div>
 
-      {/* ===== ★ [이동] 슬라이드 (WELCOME 문구 아래로) ===== */}
+      {/* ===== 슬라이드 ===== */}
       {slideImages && slideImages.length > 0 && (
         <div style={{ ...h.sliderContainer, marginTop: 10, marginBottom: 22 }}>
           <div style={h.sliderWrap}>
@@ -209,98 +215,99 @@ export default function HomeSection({
         </div>
       )}
 
-      {/* ===== ★ [이동] 광고 1 (슬라이드 밑) ===== */}
+      {/* ===== 배너 1 ===== */}
       {topAdImage && (
-        <div style={h.topAdWrap}>
-          <img src={topAdImage} style={h.topAdImg} alt="ad" draggable="false" />
-        </div>
+        <Reveal>
+          <div style={h.topAdWrap}>
+            <img src={topAdImage} style={h.topAdImg} alt="ad" draggable="false" />
+          </div>
+        </Reveal>
       )}
 
-      {/* ===== ★ [이동] 광고 2 (광고 1 밑) ===== */}
+      {/* ===== ★ 서비스 카드 3개 ===== */}
+      <Reveal>
+        <div style={h.serviceSection}>
+          <div style={h.sectionLabel}>PREMIUM SERVICE</div>
+          <div style={h.serviceGrid}>
+            {serviceCards.map((c, i) => (
+              <div key={i} className="service-card" style={h.serviceCard} onClick={c.onClick}>
+                <div style={h.serviceIcon}>{c.icon}</div>
+                <div style={h.serviceTitle}>{c.title}</div>
+                <div style={h.serviceSub}>{c.sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Reveal>
+
+      {/* ===== 배너 2 ===== */}
       {topAdImage2 && (
-        <div style={h.topAdWrap}>
-          <img src={topAdImage2} style={h.topAdImg} alt="ad2" draggable="false" />
-        </div>
+        <Reveal>
+          <div style={h.topAdWrap}>
+            <img src={topAdImage2} style={h.topAdImg} alt="ad2" draggable="false" />
+          </div>
+        </Reveal>
       )}
 
-      {/* ★ [제거됨] 매니저 섹션 라벨 + 매니저 카드 캐러셀
-          → 매니저 개별 등록 폐지, BANADA 소개 베너로 통합됨 */}
+      {/* ===== ★ 실제 후기 미리보기 (후기가 있을 때만 표시) ===== */}
+      {reviews.length > 0 && (
+        <Reveal>
+          <GoldDivider />
+          <div style={h.reviewSection}>
+            <div style={h.sectionLabel}>REAL REVIEWS</div>
+            <div style={h.reviewTitle}>
+              {tr("회원님들의 실제 후기", "会員様のリアルな口コミ", "Real Member Reviews")}
+            </div>
+            {reviews.map((rv) => {
+              const text = (rv.content || "").trim();
+              return (
+                <div key={rv.id} style={h.reviewCard}>
+                  <div style={h.reviewStars}>{"★".repeat(Math.min(5, rv.rating || 5))}</div>
+                  <div style={h.reviewText}>
+                    “{text.length > 70 ? text.slice(0, 70) + "..." : text}”
+                  </div>
+                  <div style={h.reviewMeta}>
+                    {maskNickname(rv.userNickname || rv.userId || "익명")}
+                    {(rv.loc || rv.region) ? ` · ${getRegionName(rv.loc || rv.region)}` : ""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Reveal>
+      )}
 
-      {/* ===== FOOTER ===== */}
-      <div style={h.footerBtnArea}>
-        <button onClick={handleTelegram} className="shimmer-btn" style={h.teleBtn}>
-          💬 {t.home === "홈페이지" ? "실시간 상담 연결하기" : t.home === "ホーム" ? "リアルタイム相談を接続" : "Connect Real-time Chat"}
-        </button>
-        <p style={h.footerNotice}>24/7 PRIVATE CONCIERGE SERVICE</p>
-      </div>
+      {/* ===== ★ 상담 CTA (버건디/골드) ===== */}
+      <Reveal>
+        <GoldDivider />
+        <div style={h.footerBtnArea}>
+          <div style={h.ctaLead}>
+            {tr("당신의 새로운 인연을 찾아보세요", "新しいご縁を見つけましょう", "Find your new connection")}
+          </div>
+          <button onClick={handleTelegram} className="shimmer-btn" style={h.teleBtn}>
+            💬 {tr("매니저와 1:1 상담하기", "マネージャーと1:1相談", "Chat 1:1 with a Manager")}
+          </button>
+          <p style={h.footerNotice}>24/7 PRIVATE CONCIERGE SERVICE</p>
+        </div>
+      </Reveal>
 
       <style>{`
         .bg-pattern { position: absolute; inset: 0; background-image: radial-gradient(rgba(255,215,0,0.05) 1px, transparent 1px); background-size: 30px 30px; z-index: -1; }
         .bg-glow { position: absolute; top: -100px; left: 50%; transform: translateX(-50%); width: 150%; height: 600px; background: radial-gradient(circle, rgba(255,215,0,0.07) 0%, transparent 70%); z-index: -1; }
 
-        .notice-track { display: flex; width: max-content; white-space: nowrap; animation: noticeScroll 18s linear infinite; }
-        @keyframes noticeScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        
-        .snap-container::-webkit-scrollbar { display: none; }
-        
-        .pc-arrows-wrap { position: absolute; top: 40%; left: 0; right: 0; display: flex; justify-content: space-between; pointer-events: none; padding: 0 5px; z-index: 100; }
-        .arrow-btn { width: 40px; height: 40px; border-radius: 50%; background: #FFD700; color: #000; border: 2px solid #fff; font-size: 18px; font-weight: bold; cursor: pointer; pointer-events: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; transition: 0.2s; opacity: 0.9; }
-        .arrow-btn:hover { background: #fff; transform: scale(1.1); }
-        @media (max-width: 768px) { .pc-arrows-wrap { display: none; } }
-
         .dot-pulse-wrap { width: 12px; height: 12px; display: flex; align-items: center; justify-content: center; margin-right: 5px; }
         .dot-pulse { width: 6px; height: 6px; background: #00ff00; border-radius: 50%; box-shadow: 0 0 10px #00ff00; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
-        .shine-text { animation: textShine 2s infinite alternate; }
-        @keyframes textShine { from { opacity: .5; text-shadow: none; } to { opacity: 1; text-shadow: 0 0 10px #FFD700; } }
-        .shimmer-btn { position: relative; overflow: hidden; outline: none; border: none; }
-        .shimmer-btn::after { content: ''; position: absolute; top: -50%; left: -100%; width: 200%; height: 200%; background: linear-gradient(45deg, transparent, rgba(255,255,255,0.2), transparent); transform: rotate(45deg); animation: shimmer 3s infinite; }
+
+        .shimmer-btn { position: relative; overflow: hidden; outline: none; }
+        .shimmer-btn::after { content: ''; position: absolute; top: -50%; left: -100%; width: 200%; height: 200%; background: linear-gradient(45deg, transparent, rgba(255,215,0,0.22), transparent); transform: rotate(45deg); animation: shimmer 3s infinite; }
         @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
 
-        /* ★★★ 무한 자동 캐러셀 스타일 (매니저 카드) ★★★ */
-        .infinite-carousel-container {
-          width: 100%;
-          overflow: hidden;
-          padding: 10px 0 40px;
-          box-sizing: border-box;
-          position: relative;
-          /* 좌우 페이드 효과 (자연스러운 흘러감) */
-          -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
-          mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
-        }
+        .service-card { transition: transform 0.2s ease, border-color 0.2s ease; cursor: pointer; }
+        .service-card:active { transform: scale(0.97); border-color: rgba(255,215,0,0.7); }
 
-        .infinite-carousel-track {
-          display: flex;
-          width: max-content;
-          animation-name: scrollLeftInfinite;
-          animation-timing-function: linear;
-          animation-iteration-count: infinite;
-          will-change: transform;
-          padding-left: 20px;
-        }
-
-        /* Hover 시 자동 pause */
-        .infinite-carousel-track:hover {
-          animation-play-state: paused;
-        }
-
-        @keyframes scrollLeftInfinite {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-
-        /* 모바일에서 hover 대신 활성 스타일 */
-        @media (hover: none) {
-          .infinite-carousel-track {
-            /* 모바일: 터치 시 pause (선택적, animation-play-state는 CSS만으로 어려움) */
-          }
-        }
-
-        /* 접근성: 모션 줄이기 설정한 사용자 배려 */
         @media (prefers-reduced-motion: reduce) {
-          .infinite-carousel-track {
-            animation: none;
-          }
+          .shimmer-btn::after, .dot-pulse { animation: none; }
         }
       `}</style>
     </div>
@@ -308,24 +315,18 @@ export default function HomeSection({
 }
 
 const h = {
-  container: { position: 'relative', overflow: 'hidden', backgroundColor: '#0a0a0a', paddingBottom: 20, minHeight: '100vh', color: '#fff' },
+  container: { position: 'relative', overflow: 'hidden', background: 'linear-gradient(180deg, #0a0a0a 0%, #150810 40%, #0a0a0a 100%)', paddingBottom: 20, minHeight: '100vh', color: '#fff' },
   header: { padding: '4px 0 10px', textAlign: 'center' },
   logoArea: { marginBottom: 10 },
   logoImg: { maxWidth: '350px', filter: 'drop-shadow(0 0 10px rgba(255,215,0,0.3))' },
-  topAdWrap: { padding: '0 12px', marginBottom: 22, display: 'flex', justifyContent: 'center' },
-  topAdImg: { width: '100%', height: 'auto', display: 'block', borderRadius: '14px', border: '1px solid rgba(255,215,0,0.35)', boxShadow: '0 8px 30px rgba(0,0,0,0.6)' },
   defaultLogo: { fontSize: 36, color: '#fff', fontWeight: 900, letterSpacing: -1, lineHeight: 0.8 },
   statusBadge: { fontSize: 10, color: '#eee', background: 'rgba(255,255,255,0.07)', padding: '8px 16px', borderRadius: '30px', display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid rgba(255,255,255,0.1)' },
   countText: { color: '#FFD700', letterSpacing: 1 },
-  noticeTicker: { width: '100%', overflow: 'hidden', background: 'rgba(255,215,0,0.06)', borderTop: '1px solid rgba(255,215,0,0.15)', borderBottom: '1px solid rgba(255,215,0,0.15)', padding: '10px 0', marginTop: 18 },
-  noticeText: { fontSize: 12, fontWeight: 700, color: '#FFD700', letterSpacing: 0.5, paddingRight: 60 },
   introTextArea: { textAlign: 'center', marginTop: 30, marginBottom: 15 },
   introSub: { fontSize: 10, color: '#FFD700', letterSpacing: 2, fontWeight: 600, opacity: 0.8, marginBottom: 5 },
   introMain: { fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: -0.5 },
   introSparkle: { color: '#FFD700', marginLeft: 5, fontSize: 14 },
-  welcomeBox: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 15, margin: '35px 0' },
-  welcomeLine: { width: 30, height: 1, background: 'linear-gradient(90deg, transparent, #FFD700, transparent)' },
-  welcomeText: { color: '#bbb', fontSize: 13, fontWeight: 300, letterSpacing: 0.5, textAlign: 'center' },
+
   sliderContainer: { padding: '0 20px' },
   sliderWrap: { width: '100%', height: '260px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   slide: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'opacity 1s ease-in-out' },
@@ -335,40 +336,35 @@ const h = {
   adTag: { position: 'absolute', top: 12, left: 12, background: 'linear-gradient(135deg, #FFD700, #B8860B)', color: '#000', fontSize: 9, fontWeight: 900, padding: '4px 8px', borderRadius: 4, zIndex: 4 },
   indicatorWrap: { position: 'absolute', bottom: 5, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 5, zIndex: 5 },
   dot: { height: 6, borderRadius: 3, transition: 'all 0.3s' },
-  sectionLabel: { padding: '40px 24px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  labelLeft: { display: 'flex', alignItems: 'center', gap: 8 },
-  labelIcon: { color: '#FFD700', fontSize: 18 },
-  labelText: { color: '#fff', fontSize: 17, fontWeight: 800 },
-  moreBtn: { fontSize: 11, color: '#FFD700', opacity: 0.8, cursor: 'pointer' },
 
-  scrollArea: { 
-    display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', overflowX: 'auto', 
-    scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', 
-    padding: '10px 20px 40px', width: '100%', boxSizing: 'border-box',
-    scrollbarWidth: 'none', msOverflowStyle: 'none'
-  },
-  card: { 
-    width: '210px', minWidth: '210px', flexShrink: 0, background: '#1a1a1a', 
-    borderRadius: '20px', overflow: 'hidden', border: '1px solid #333', 
-    boxShadow: '0 10px 25px rgba(0,0,0,0.6)', scrollSnapAlign: 'center', 
-    marginRight: '15px', cursor: 'pointer'
-  },
-  cardImgWrap: { position: 'relative', height: '280px' },
-  cardImg: { width: '100%', height: '100%', objectFit: 'cover' },
-  cardOverlay: { position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 50%, #1a1a1a 100%)' },
-  cardBadge: { position: 'absolute', top: 12, right: 12, background: 'rgba(255,215,0,0.9)', color: '#000', fontSize: 10, fontWeight: 900, padding: '4px 10px', borderRadius: 6 },
-  
-  cardInfo: { padding: '15px 10px 22px', textAlign: 'center' },
-  cardName: { color: '#fff', fontSize: '20px', fontWeight: 900, marginBottom: 8, letterSpacing: '-0.5px' },
-  
-  cardSpecs: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  specText: { fontSize: '13px', color: '#bbb', fontWeight: 400 },
-  specDivider: { fontSize: '12px', color: '#555' },
+  topAdWrap: { padding: '0 12px', marginBottom: 22, display: 'flex', justifyContent: 'center' },
+  topAdImg: { width: '100%', height: 'auto', display: 'block', borderRadius: '14px', border: '1px solid rgba(255,215,0,0.35)', boxShadow: '0 8px 30px rgba(0,0,0,0.6)' },
 
-  footerBtnArea: { 
-    padding: '20px 24px 12px',
-    textAlign: 'center',
-  },
-  teleBtn: { width: '100%', padding: '16px', borderRadius: '12px', background: 'linear-gradient(135deg, #0088cc, #005588)', color: '#fff', fontSize: '15px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  footerNotice: { fontSize: 10, color: '#444', marginTop: 6, letterSpacing: 2 }
+  // 서비스 카드
+  serviceSection: { padding: '4px 12px 26px' },
+  sectionLabel: { textAlign: 'center', fontSize: 10, color: '#FFD700', letterSpacing: 3, fontWeight: 700, opacity: 0.85, marginBottom: 14 },
+  serviceGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
+  serviceCard: { background: 'linear-gradient(160deg, rgba(120,20,60,0.35), rgba(15,8,12,0.9))', border: '1px solid rgba(212,175,55,0.4)', borderRadius: 14, padding: '18px 6px 16px', textAlign: 'center' },
+  serviceIcon: { fontSize: 26, color: '#FFD700', marginBottom: 8, textShadow: '0 0 12px rgba(255,215,0,0.45)' },
+  serviceTitle: { fontSize: 12, fontWeight: 800, color: '#fff', marginBottom: 4, letterSpacing: -0.3 },
+  serviceSub: { fontSize: 10, color: '#b9a98a', lineHeight: 1.4 },
+
+  // 구분선
+  divider: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, margin: '6px 24px 22px' },
+  dividerLine: { flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(212,175,55,0.7))' },
+  dividerIcon: { color: '#FFD700', fontSize: 12 },
+
+  // 후기
+  reviewSection: { padding: '0 16px 26px' },
+  reviewTitle: { textAlign: 'center', fontSize: 17, fontWeight: 800, color: '#fff', marginBottom: 16 },
+  reviewCard: { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(212,175,55,0.25)', borderRadius: 14, padding: '16px 16px 14px', marginBottom: 10 },
+  reviewStars: { color: '#FFD700', fontSize: 13, letterSpacing: 2, marginBottom: 8 },
+  reviewText: { color: '#e8e0d0', fontSize: 13, lineHeight: 1.65, marginBottom: 10 },
+  reviewMeta: { color: '#8a7f6a', fontSize: 11 },
+
+  // CTA
+  footerBtnArea: { padding: '0 24px 12px', textAlign: 'center' },
+  ctaLead: { fontSize: 13, color: '#d9c48a', marginBottom: 14, letterSpacing: 0.3 },
+  teleBtn: { width: '100%', padding: '16px', borderRadius: '12px', background: 'linear-gradient(135deg, #6b1235, #2e0a1a)', border: '1px solid rgba(212,175,55,0.75)', color: '#f6e7c1', fontSize: '15px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, boxShadow: '0 6px 24px rgba(107,18,53,0.5)' },
+  footerNotice: { fontSize: 10, color: '#555', marginTop: 8, letterSpacing: 2 },
 };
