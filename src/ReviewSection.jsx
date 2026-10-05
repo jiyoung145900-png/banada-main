@@ -40,6 +40,14 @@ export default function ReviewSection({
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [selectedReview, setSelectedReview] = useState(null);
   const [sortMode, setSortMode] = useState("latest"); // latest | popular
+  
+  // ★ [신규] PIN 입력 관련 state
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinVerified, setPinVerified] = useState(false); // 세션 내 통과 유지
+  const [pinError, setPinError] = useState("");
+  const [pinFailCount, setPinFailCount] = useState(0);
+  const [pinLockedUntil, setPinLockedUntil] = useState(0); // 잠금 해제 시각 (ms)
 
   const isKo = t?.home === "홈페이지";
   const isJa = t?.home === "ホーム";
@@ -289,13 +297,21 @@ export default function ReviewSection({
             alert(tr("회원만 작성 가능합니다.", "会員のみ作成可能です。", "Members only."));
             return;
           }
-          // ★ [신규] 추천코드 체크 - VIP 전용 서비스
-          // reviewAccessCode가 설정되어 있고, 유저의 referral이 일치해야 작성 가능
-          if (reviewAccessCode && user?.referral !== reviewAccessCode) {
-            alert(tr("VIP 전용 서비스입니다.", "VIP専用サービスです。", "VIP members only."));
+          // ★ [신규] PIN 체크 - Admin에서 설정한 PIN 필요
+          // 이미 세션 내 통과했으면 바로 작성 모달
+          if (pinVerified) {
+            setShowWriteModal(true);
             return;
           }
-          setShowWriteModal(true);
+          // PIN 미설정이면 바로 통과 (설정 안 했으면 아무나 작성)
+          if (!reviewAccessCode) {
+            setShowWriteModal(true);
+            return;
+          }
+          // PIN 입력 모달 띄우기
+          setPinInput("");
+          setPinError("");
+          setShowPinModal(true);
         }}
         aria-label="후기 작성"
       >
@@ -304,6 +320,119 @@ export default function ReviewSection({
           {tr("후기 작성", "レビュー作成", "WRITE")}
         </span>
       </button>
+
+      {/* ===== PIN 입력 모달 ===== */}
+      {showPinModal && (
+        <div style={pinS.overlay} onClick={() => setShowPinModal(false)}>
+          <div style={pinS.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={pinS.icon}>🔒</div>
+            <div style={pinS.title}>
+              {tr("후기 작성 PIN", "レビュー作成PIN", "REVIEW PIN")}
+            </div>
+            <div style={pinS.desc}>
+              {tr(
+                "VIP 전용 서비스입니다.\n관리자에게 받은 PIN을 입력하세요.",
+                "VIP専用サービスです。\n管理者から受け取ったPINを入力してください。",
+                "VIP members only.\nEnter the PIN from administrator."
+              )}
+            </div>
+
+            {/* 잠금 상태 체크 */}
+            {Date.now() < pinLockedUntil ? (
+              <div style={pinS.lockMsg}>
+                ⏱ {tr(
+                  `${Math.ceil((pinLockedUntil - Date.now()) / 1000)}초 후 다시 시도하세요`,
+                  `${Math.ceil((pinLockedUntil - Date.now()) / 1000)}秒後に再試行してください`,
+                  `Try again in ${Math.ceil((pinLockedUntil - Date.now()) / 1000)}s`
+                )}
+              </div>
+            ) : (
+              <>
+                <input
+                  type="password"
+                  value={pinInput}
+                  onChange={(e) => { setPinInput(e.target.value); setPinError(""); }}
+                  placeholder="● ● ● ● ● ●"
+                  style={pinS.input}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      // 제출 로직
+                      if (pinInput === reviewAccessCode) {
+                        setPinVerified(true);
+                        setShowPinModal(false);
+                        setShowWriteModal(true);
+                        setPinFailCount(0);
+                      } else {
+                        const nextFail = pinFailCount + 1;
+                        setPinFailCount(nextFail);
+                        if (nextFail >= 3) {
+                          setPinLockedUntil(Date.now() + 5 * 60 * 1000);
+                          setPinError(tr(
+                            "3회 실패! 5분간 입력이 잠깁니다.",
+                            "3回失敗!5分間ロックされます。",
+                            "3 failures! Locked for 5 minutes."
+                          ));
+                          setPinFailCount(0);
+                        } else {
+                          setPinError(tr(
+                            `PIN이 틀렸습니다. (${nextFail}/3)`,
+                            `PINが間違っています。(${nextFail}/3)`,
+                            `Wrong PIN. (${nextFail}/3)`
+                          ));
+                        }
+                        setPinInput("");
+                      }
+                    }
+                  }}
+                />
+                {pinError && <div style={pinS.errorMsg}>{pinError}</div>}
+                
+                <div style={pinS.btnRow}>
+                  <button 
+                    style={pinS.cancelBtn} 
+                    onClick={() => setShowPinModal(false)}
+                  >
+                    {tr("취소", "キャンセル", "Cancel")}
+                  </button>
+                  <button 
+                    style={pinS.submitBtn}
+                    onClick={() => {
+                      if (pinInput === reviewAccessCode) {
+                        setPinVerified(true);
+                        setShowPinModal(false);
+                        setShowWriteModal(true);
+                        setPinFailCount(0);
+                      } else {
+                        const nextFail = pinFailCount + 1;
+                        setPinFailCount(nextFail);
+                        if (nextFail >= 3) {
+                          setPinLockedUntil(Date.now() + 5 * 60 * 1000);
+                          setPinError(tr(
+                            "3회 실패! 5분간 입력이 잠깁니다.",
+                            "3回失敗!5分間ロックされます。",
+                            "3 failures! Locked for 5 minutes."
+                          ));
+                          setPinFailCount(0);
+                        } else {
+                          setPinError(tr(
+                            `PIN이 틀렸습니다. (${nextFail}/3)`,
+                            `PINが間違っています。(${nextFail}/3)`,
+                            `Wrong PIN. (${nextFail}/3)`
+                          ));
+                        }
+                        setPinInput("");
+                      }
+                    }}
+                  >
+                    {tr("확인", "確認", "OK")}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ===== 후기 작성 모달 ===== */}
       {showWriteModal && (
@@ -478,3 +607,104 @@ function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult
     </div>
   );
 }
+
+// ★ [신규] PIN 입력 모달 스타일
+const pinS = {
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.92)',
+    zIndex: 10000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    backdropFilter: 'blur(10px)',
+  },
+  modal: {
+    background: 'linear-gradient(145deg, #1a1a1a, #0f0f0f)',
+    borderRadius: 24,
+    padding: '32px 24px',
+    width: '100%',
+    maxWidth: 360,
+    border: '1px solid #333',
+    boxShadow: '0 10px 40px rgba(212,175,55,0.15)',
+    textAlign: 'center',
+  },
+  icon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  title: {
+    color: '#D4AF37',
+    fontSize: 22,
+    fontWeight: 900,
+    marginBottom: 10,
+    letterSpacing: '1px',
+  },
+  desc: {
+    color: '#888',
+    fontSize: 13,
+    lineHeight: 1.6,
+    marginBottom: 24,
+    whiteSpace: 'pre-line',
+  },
+  input: {
+    width: '100%',
+    padding: '16px 20px',
+    background: '#000',
+    border: '1px solid #333',
+    borderRadius: 12,
+    color: '#D4AF37',
+    fontSize: 20,
+    fontWeight: 700,
+    letterSpacing: '8px',
+    textAlign: 'center',
+    outline: 'none',
+    boxSizing: 'border-box',
+    marginBottom: 12,
+  },
+  errorMsg: {
+    color: '#ff5252',
+    fontSize: 13,
+    fontWeight: 600,
+    marginBottom: 16,
+    minHeight: 20,
+  },
+  lockMsg: {
+    color: '#ff9800',
+    fontSize: 15,
+    fontWeight: 700,
+    padding: '20px 0',
+    background: 'rgba(255,152,0,0.1)',
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  btnRow: {
+    display: 'flex',
+    gap: 10,
+    marginTop: 8,
+  },
+  cancelBtn: {
+    flex: 1,
+    padding: '14px',
+    background: '#222',
+    color: '#888',
+    border: 'none',
+    borderRadius: 12,
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  submitBtn: {
+    flex: 2,
+    padding: '14px',
+    background: '#D4AF37',
+    color: '#000',
+    border: 'none',
+    borderRadius: 12,
+    fontSize: 15,
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+};
