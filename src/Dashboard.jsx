@@ -501,7 +501,7 @@ export default function Dashboard({
       }}>
         {[
           { key: 'home', label: t.home, icon: '🏠' },
-          { key: 'about', label: 'BANADA', icon: '✨' }, // ★ [변경] 매니저 → 바나다 (회사 소개)
+          { key: 'about', label: lang === 'ja' ? '企業情報' : lang === 'en' ? 'ABOUT' : '기업정보', icon: '✨' },
           { key: 'event', label: t.event, icon: '🎁' },
           { key: 'review', label: t.review || '후기', icon: '⭐' },  // ★ video → review 교체!
           { key: 'mypage', label: t.mypage, icon: '👤' }
