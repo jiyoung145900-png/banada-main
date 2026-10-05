@@ -42,7 +42,8 @@ export default function Dashboard({
   topAdImage, // ★ [신규] 로고 밑 첫 번째 광고 이미지 URL
   topAdImage2, // ★ [신규] LIVE CONNECTED 위, 두 번째 광고 이미지 URL
   telegramLink = "",
-  noticeText = "" // ★ [추가] 홈 상단 공지 티커 문구
+  noticeText = "", // ★ [추가] 홈 상단 공지 티커 문구
+  reviewAccessCode = "" // ★ [신규] 후기 작성 가능 추천코드 (Admin 설정)
 }) {
   const [activeTab, setActiveTab] = useState('home');
   
@@ -414,7 +415,8 @@ export default function Dashboard({
             isGuest={isGuest}
             regions={regions}
             members={members}
-            telegramLink={telegramLink}  // ★ 중요! 후기 섹션에 telegramLink 전달!
+            telegramLink={telegramLink}
+            reviewAccessCode={reviewAccessCode}  // ★ [신규] 후기 작성 추천코드 전달
             backHandlerRef={localBackHandlerRef}
           />
         );

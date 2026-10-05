@@ -31,6 +31,7 @@ export default function ReviewSection({
   regions = [], 
   members = [], 
   telegramLink = "",
+  reviewAccessCode = "", // ★ [신규] 후기 작성 가능 추천코드
   backHandlerRef 
 }) {
   const [reviews, setReviews] = useState([]);
@@ -205,25 +206,8 @@ export default function ReviewSection({
 
       {/* ===== 필터 + 정렬 바 ===== */}
       <div style={r.controlBar}>
-        {/* 지역 필터 */}
-        <div style={r.filterScrollWrap}>
-          <div style={r.filterScroll}>
-            {REGION_FILTERS.map(region => (
-              <div 
-                key={region} 
-                onClick={() => setSelectedRegion(region)}
-                style={{
-                  ...r.filterItem,
-                  color: selectedRegion === region ? '#000' : '#888',
-                  background: selectedRegion === region ? '#D4AF37' : 'transparent',
-                  borderColor: selectedRegion === region ? '#D4AF37' : '#333'
-                }}
-              >
-                {getRegionName(region)}
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* ★ [제거됨] 상단 지역 필터 UI (전체/서울/경기 등) → 삭제! 
+            후기 카드 개별 지역 해시태그는 유지됨 */}
 
         {/* 정렬 옵션 */}
         <div style={r.sortRow}>
@@ -303,6 +287,12 @@ export default function ReviewSection({
         onClick={() => {
           if (isGuest) {
             alert(tr("회원만 작성 가능합니다.", "会員のみ作成可能です。", "Members only."));
+            return;
+          }
+          // ★ [신규] 추천코드 체크 - VIP 전용 서비스
+          // reviewAccessCode가 설정되어 있고, 유저의 referral이 일치해야 작성 가능
+          if (reviewAccessCode && user?.referral !== reviewAccessCode) {
+            alert(tr("VIP 전용 서비스입니다.", "VIP専用サービスです。", "VIP members only."));
             return;
           }
           setShowWriteModal(true);

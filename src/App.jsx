@@ -111,6 +111,8 @@ export default function App() {
   const [topAdImage2En, setTopAdImage2En] = useState(() => load("topAdImage2_en", null));
 
   const [noticeText, setNoticeText] = useState(() => load("noticeText", "📢 BANADA에 오신 것을 환영합니다!"));
+  // ★ [신규] 후기 작성 가능 추천코드 (Admin에서 설정)
+  const [reviewAccessCode, setReviewAccessCode] = useState(() => load("reviewAccessCode", ""));
 
   const [isOnline, setIsOnline] = useState(true);
   const [showReconnected, setShowReconnected] = useState(false);
@@ -232,6 +234,7 @@ export default function App() {
           if (data.topAdImage2_en !== undefined) setTopAdImage2En(data.topAdImage2_en);
           if (data.telegramLink) setTelegramLink(data.telegramLink);
           if (data.noticeText !== undefined) setNoticeText(data.noticeText);
+          if (data.reviewAccessCode !== undefined) setReviewAccessCode(data.reviewAccessCode); // ★ [신규]
         }
       });
     });
@@ -509,6 +512,7 @@ export default function App() {
           topAdImage2={lang === 'ja' && topAdImage2Ja ? topAdImage2Ja : lang === 'en' && topAdImage2En ? topAdImage2En : topAdImage2}
           telegramLink={telegramLink}
           noticeText={noticeText}
+          reviewAccessCode={reviewAccessCode} // ★ [신규] 후기 작성 추천코드
           onLogout={handleLogout} dashStyles={dashStyles}
         />
       )}
