@@ -209,8 +209,22 @@ if (view === "settings") return <SettingsView onBack={()=>setView("main")} isKo=
             <span style={myStyles.menuTitle}>📋 &nbsp; {tr("이용 내역", "利用履歴", "History")}</span>
             <span style={myStyles.arrow}>❯</span>
           </div>
-          {/* ★ [수정완료] App.jsx의 telegramLink가 전체 URL 형식이므로 그대로 띄우게 연결했습니다. */}
-          <div style={myStyles.menuItem} onClick={() => window.open(telegramLink || 'https://t.me/BANADA_support', '_blank')}>
+          {/* ★ [변경] Sales Smartly 채팅 위젯 열기 */}
+          <div style={myStyles.menuItem} onClick={() => {
+            try {
+              if (window.SSQ && typeof window.SSQ.openChat === 'function') {
+                window.SSQ.openChat();
+                return;
+              }
+              const chatBtn = document.querySelector('[class*="salesmartly"]')
+                || document.querySelector('#SSQ-container')
+                || document.querySelector('iframe[src*="salesmartly"]');
+              if (chatBtn) { chatBtn.click(); return; }
+              if (telegramLink) window.open(telegramLink, '_blank');
+            } catch (e) {
+              if (telegramLink) window.open(telegramLink, '_blank');
+            }
+          }}>
             <span style={myStyles.menuTitle}>💬 &nbsp; {tr("1:1 실시간 상담", "1:1リアルタイム相談", "1:1 Support")}</span>
             <span style={myStyles.arrow}>❯</span>
           </div>
