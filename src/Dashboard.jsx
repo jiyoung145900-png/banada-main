@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import HomeSection from "./HomeSection";
-import ManagerSection from "./ManagerSection";
+import AboutBanadaSection from "./AboutBanadaSection"; // ★ [신규] 매니저 → 회사 소개 베너
 import ReviewSection from "./ReviewSection";  // ★ VideoSection → ReviewSection 교체!
 import EventSection from "./EventSection";
 import MyPageSection from "./MyPage"; 
@@ -380,13 +380,13 @@ export default function Dashboard({
             noticeText={noticeText} // ★ [추가] 공지 티커 문구 전달
           />
         );
-      case 'manager':
+      // ★ [변경] 매니저 섹션 → BANADA 회사 소개 베너 게시판
+      case 'about':
         return (
-          <ManagerSection 
-            t={t} regions={regions} selectedRegion={selectedRegion} setSelectedRegion={handleRegionChange} 
-            filteredMembers={filteredMembers} initialMember={selectedM} 
-            onCloseDetail={() => setSelectedM(null)}
-            backHandlerRef={localBackHandlerRef}
+          <AboutBanadaSection 
+            t={t} 
+            user={user}
+            isGuest={isGuest}
           />
         );
       case 'event':
@@ -481,7 +481,7 @@ export default function Dashboard({
       }}>
         {[
           { key: 'home', label: t.home, icon: '🏠' },
-          { key: 'manager', label: t.manager, icon: '💎' },
+          { key: 'about', label: 'BANADA', icon: '✨' }, // ★ [변경] 매니저 → 바나다 (회사 소개)
           { key: 'event', label: t.event, icon: '🎁' },
           { key: 'review', label: t.review || '후기', icon: '⭐' },  // ★ video → review 교체!
           { key: 'mypage', label: t.mypage, icon: '👤' }
