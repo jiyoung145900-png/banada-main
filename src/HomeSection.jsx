@@ -223,77 +223,8 @@ export default function HomeSection({
         </div>
       )}
 
-      {/* ===== 매니저 섹션 라벨 ===== */}
-      <div style={h.sectionLabel}>
-        <div style={h.labelLeft}>
-          <span style={h.labelIcon}>✦</span>
-          <span style={h.labelText}>
-            BANADA {t.manager.toUpperCase()}
-          </span>
-        </div>
-        <div onClick={() => setActiveTab && setActiveTab("manager")} style={h.moreBtn}>
-          VIEW ALL ❯
-        </div>
-      </div>
-
-      {/* ===== 매니저 카드 리스트 - ★★ 무한 자동 캐러셀 ★★ ===== */}
-      {/*
-        ★ [신규] 안전한 CSS 애니메이션 기반 무한 슬라이드
-        - React state 없음 (리렌더 X, 안정적)
-        - CSS transform + GPU 가속 (부드러움)
-        - Hover 시 자동 pause (사진 자세히 보기)
-        - 매니저 수에 따라 속도 자동 조정
-        - 예전 오류 원인들 완전 회피
-      */}
-      {members && members.length > 0 && (
-        <div className="infinite-carousel-container">
-          <div 
-            className="infinite-carousel-track"
-            style={{
-              // ★ 매니저 수에 따라 duration 자동 조정 (한 명당 약 3.5초)
-              animationDuration: `${Math.max(20, members.length * 3.5)}s`
-            }}
-          >
-            {loopMembers.map((m, i) => (
-              <div 
-                key={`carousel-${m.id || 'noid'}-${i}`}
-                style={h.card} 
-                onClick={() => openDetail && openDetail(m)}
-              >
-                <div style={h.cardImgWrap}>
-                  <img src={m.img} style={h.cardImg} alt={getMemberName(m) || "member"} draggable="false" />
-                  <div style={h.cardOverlay} />
-                  <div style={h.cardBadge}>
-                    {LEFT_TAGS[i % LEFT_TAGS.length]}
-                  </div>
-                </div>
-                
-                <div style={h.cardInfo}>
-                  <div style={h.cardName}>{getMemberName(m)}</div>
-                  
-                  <div style={h.cardSpecs}>
-                    <span style={h.specText}>
-                      {getLocName(m.loc || m.region) || tr("지역", "エリア", "Area")}
-                    </span>
-                    <span style={h.specDivider}>·</span>
-                    <span style={h.specText}>
-                      {m.age ? `${m.age}${tr('세', '歳', '')}` : tr('20대', '20代', '20s')}
-                    </span>
-                  </div>
-                  
-                  <div style={{ ...h.cardSpecs, marginTop: '5px' }}>
-                    <span style={h.specText}>{m.height ? m.height + 'cm' : 'cm'}</span>
-                    <span style={h.specDivider}>·</span>
-                    <span style={h.specText}>{m.weight ? m.weight + 'kg' : 'kg'}</span>
-                    <span style={h.specDivider}>·</span>
-                    <span style={h.specText}>{m.bust || m.size || "Size"}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* ★ [제거됨] 매니저 섹션 라벨 + 매니저 카드 캐러셀
+          → 매니저 개별 등록 폐지, BANADA 소개 베너로 통합됨 */}
 
       {/* ===== FOOTER ===== */}
       <div style={h.footerBtnArea}>
