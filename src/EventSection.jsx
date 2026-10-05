@@ -617,8 +617,8 @@ return (
                         {isDonating
                           ? tr("처리 중...", "処理中...", "PROCESSING...")
                           : (isKo 
-                              ? (pendingCount === 0 ? "베팅" : "추가베팅") 
-                              : (pendingCount === 0 ? "BET" : "ADD BET"))}
+                              ? (pendingCount === 0 ? "신청" : "추가신청") 
+                              : (pendingCount === 0 ? "APPLY" : "ADD APPLY"))}
                       </button>
                     </div>
 
