@@ -346,46 +346,6 @@ export default function ReviewWriteModal({
             </div>
           )}
 
-          {/* 매니저 선택 - 선택사항 */}
-          <div style={w.field}>
-            <label style={w.label}>
-              👤 {tr("매니저 선택", "マネージャー選択", "Manager")}
-              <span style={w.optional}>({tr("선택", "任意", "optional")})</span>
-            </label>
-            {selectedManager ? (
-              <div style={w.selectedManagerBox}>
-                <div style={w.selectedManagerInfo}>
-                  <img 
-                    src={selectedManager.img} 
-                    style={w.selectedManagerImg} 
-                    alt=""
-                  />
-                  <div>
-                    <div style={w.selectedManagerName}>
-                      {selectedManager.name_ko || selectedManager.name}
-                    </div>
-                    <div style={w.selectedManagerLoc}>
-                      {getRegionName(selectedManager.loc || selectedManager.region)}
-                    </div>
-                  </div>
-                </div>
-                <button 
-                  style={w.removeManagerBtn}
-                  onClick={() => setSelectedManager(null)}
-                >
-                  ✕
-                </button>
-              </div>
-            ) : (
-              <button 
-                style={w.pickManagerBtn}
-                onClick={() => setShowManagerPicker(true)}
-              >
-                + {tr("매니저 선택하기", "マネージャーを選択", "Choose Manager")}
-              </button>
-            )}
-          </div>
-
           {/* 별점 */}
           <div style={w.field}>
             <label style={w.label}>
@@ -425,7 +385,14 @@ export default function ReviewWriteModal({
               style={w.textarea}
               maxLength={500}
             />
-            <div style={w.charCount}>{content.length} / 500</div>
+            <div style={w.charCount}>
+              {content.trim().length < 10 && (
+                <span style={{ color: '#ff9800', marginRight: 8 }}>
+                  {tr("10자 이상 입력해주세요", "10文字以上入力してください", "At least 10 characters")}
+                </span>
+              )}
+              {content.length} / 500
+            </div>
           </div>
 
           {/* 익명 안내 */}
