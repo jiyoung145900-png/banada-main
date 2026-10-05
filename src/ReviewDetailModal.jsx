@@ -227,9 +227,7 @@ export default function ReviewDetailModal({
 
           {/* 상담 버튼 */}
           <button style={d.consultBtn} onClick={onConsult}>
-            💬 {review.managerName 
-              ? `${review.managerName} ${tr("매니저 상담 받기", "マネージャー相談を受ける", "Consult this Manager")}`
-              : tr("이 지역 매니저 상담 받기", "この地域のマネージャー相談を受ける", "Consult this Area")}
+            💬 {tr("상담 문의하기", "ご相談・お問い合わせ", "Make an Inquiry")}
           </button>
 
           {/* 댓글 섹션 */}

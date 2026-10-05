@@ -610,9 +610,7 @@ function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult
         style={r.consultBtn}
         onClick={(e) => { e.stopPropagation(); onConsult(); }}
       >
-        💬 {review.managerName 
-          ? `${review.managerName} ${tr("매니저 상담", "マネージャー相談", "Consult")}`
-          : tr("이 지역 매니저 상담", "この地域のマネージャー相談", "Consult this area")}
+        💬 {tr("상담 문의", "ご相談・お問い合わせ", "Inquiry")}
       </button>
     </div>
   );
