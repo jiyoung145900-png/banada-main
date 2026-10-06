@@ -5,7 +5,7 @@ import {
 } from "firebase/firestore";
 import { db, authReady } from "./firebase";
 import { maskNickname } from "./nicknameUtils";
-import { getFakeNickname } from "./fakeNicknames";
+import { getFakeNickname, pickRandomNickname } from "./fakeNicknames";
 
 export default function ReviewDetailModal({ 
   review, 
@@ -28,7 +28,7 @@ export default function ReviewDetailModal({
   const hasLiked = review.likedBy?.includes(user?.id);
   const isVideo = review.mediaType === "video";
   const isOwnReview = review.userId === user?.id;
-  const maskedNick = getFakeNickname(review.userId, fakeNicknameOverrides);
+  const maskedNick = review.displayName || getFakeNickname(review.userId, fakeNicknameOverrides);
 
   // ★ 댓글 실시간 로드
   useEffect(() => {
@@ -89,6 +89,7 @@ export default function ReviewDetailModal({
       // 1. 댓글 추가
       await addDoc(collection(db, "reviews", review.id, "comments"), {
         userId: user.id,
+        displayName: pickRandomNickname(), // ★ 작성 시점 랜덤 닉네임
         userNickname: user.nickname || user.name || user.id,
         text: commentText.trim(),
         createdAt: Date.now(),
@@ -244,7 +245,7 @@ export default function ReviewDetailModal({
             ) : (
               <div style={d.commentsList}>
                 {comments.map(c => {
-                  const cMaskedNick = getFakeNickname(c.userId, fakeNicknameOverrides);
+                  const cMaskedNick = c.displayName || getFakeNickname(c.userId, fakeNicknameOverrides);
                   const isOwnComment = c.userId === user?.id;
                   return (
                     <div key={c.id} style={d.commentItem}>

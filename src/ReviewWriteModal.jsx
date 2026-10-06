@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo } from "react";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, authReady } from "./firebase";
+import { pickRandomNickname } from "./fakeNicknames";
 import { uploadToCloudinary, generateVideoThumbnail } from "./CloudinaryService";
 import { uploadToR2, isVideoFile } from "./R2Service";
 
@@ -142,6 +143,7 @@ export default function ReviewWriteModal({
       await authReady;
       await addDoc(collection(db, "reviews"), {
         userId: user.id,
+        displayName: pickRandomNickname(), // ★ 작성 시점 랜덤 닉네임
         userNickname: user.nickname || user.name || user.id,
         mediaUrl,
         thumbnailUrl, // ★ 영상일 때만 값 있음 (사진은 null)

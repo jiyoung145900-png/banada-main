@@ -548,7 +548,7 @@ function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult
   const hasLiked = review.likedBy?.includes(currentUserId);
   const isVideo = review.mediaType === "video";
   
-  const maskedNick = getFakeNickname(review.userId, fakeNicknameOverrides);
+  const maskedNick = review.displayName || getFakeNickname(review.userId, fakeNicknameOverrides);
   
   // 시간 표시 (몇 분 전, 몇 시간 전, 며칠 전)
   const getTimeAgo = (timestamp) => {
