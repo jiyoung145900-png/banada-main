@@ -335,7 +335,8 @@ export default function ReviewSection({
               isKo={isKo}
               isJa={isJa}
               getRegionName={getRegionName}
-            />
+            fakeNicknameOverrides={fakeNicknameOverrides}
+              />
           ))}
         </div>
       )}
@@ -544,7 +545,7 @@ export default function ReviewSection({
 // ============================================
 // ★ 후기 카드 컴포넌트
 // ============================================
-function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult, tr, isKo, isJa, getRegionName }) {
+function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult, tr, isKo, isJa, getRegionName, fakeNicknameOverrides = {} }) {
   const hasLiked = review.likedBy?.includes(currentUserId);
   const isVideo = review.mediaType === "video";
   
