@@ -5,6 +5,7 @@ import {
 } from "firebase/firestore";
 import { db, authReady } from "./firebase";
 import { maskNickname } from "./nicknameUtils";
+import { getFakeNickname } from "./fakeNicknames";
 
 export default function ReviewDetailModal({ 
   review, 
@@ -18,7 +19,7 @@ export default function ReviewDetailModal({
   isKo, 
   isJa,
   getRegionName 
-}) {
+, fakeNicknameOverrides = {} }) {
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -27,7 +28,7 @@ export default function ReviewDetailModal({
   const hasLiked = review.likedBy?.includes(user?.id);
   const isVideo = review.mediaType === "video";
   const isOwnReview = review.userId === user?.id;
-  const maskedNick = maskNickname(review.userNickname || review.userId || "익명");
+  const maskedNick = getFakeNickname(review.userId, fakeNicknameOverrides);
 
   // ★ 댓글 실시간 로드
   useEffect(() => {
@@ -203,7 +204,7 @@ export default function ReviewDetailModal({
               onClick={onLike}
             >
               <span style={{ fontSize: 24 }}>{hasLiked ? "❤️" : "🤍"}</span>
-              <span style={d.interactionCount}>{review.likeCount || 0}</span>
+              <span style={d.interactionCount}>{review.likeCount || 0} · 👁️ {(review.viewCount || 0).toLocaleString()}</span>
             </div>
             <div style={d.interactionBtn}>
               <span style={{ fontSize: 22 }}>💬</span>
@@ -243,7 +244,7 @@ export default function ReviewDetailModal({
             ) : (
               <div style={d.commentsList}>
                 {comments.map(c => {
-                  const cMaskedNick = maskNickname(c.userNickname || c.userId || "익명");
+                  const cMaskedNick = getFakeNickname(c.userId, fakeNicknameOverrides);
                   const isOwnComment = c.userId === user?.id;
                   return (
                     <div key={c.id} style={d.commentItem}>

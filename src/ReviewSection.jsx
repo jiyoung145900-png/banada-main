@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { collection, query, orderBy, onSnapshot, doc, deleteDoc, updateDoc, increment, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db, authReady } from "./firebase";
 import { maskNickname } from "./nicknameUtils";
+import { getFakeNickname } from "./fakeNicknames";
 import ReviewWriteModal from "./ReviewWriteModal";
 import ReviewDetailModal from "./ReviewDetailModal";
 import { r } from "./ReviewStyles";
@@ -62,6 +63,20 @@ export default function ReviewSection({
   };
 
   // ★★★ [신규] 로컬 뒤로가기 핸들러 등록
+  // ★ [신규] Admin이 지정한 가짜 닉네임 오버라이드 로드
+  useEffect(() => {
+    let unsub;
+    authReady.then(() => {
+      unsub = onSnapshot(doc(db, "settings", "global"), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setFakeNicknameOverrides(data.fakeNicknameOverrides || {});
+        }
+      }, (err) => console.warn("overrides 로드 실패:", err));
+    });
+    return () => { if (unsub) unsub(); };
+  }, []);
+
   useEffect(() => {
     if (!backHandlerRef) return;
     
@@ -171,6 +186,34 @@ export default function ReviewSection({
       alert(tr("삭제 실패", "削除失敗", "Delete failed"));
     }
   }, [reviews, user]);
+
+  // ★ [신규] 후기 상세 열기 + 조회수 증가 (같은 유저 하루 1번)
+  const handleOpenReview = useCallback(async (review) => {
+    setSelectedReview(review);
+    try {
+      // localStorage에서 오늘 본 후기 ID 리스트 확인
+      const today = new Date().toISOString().slice(0, 10); // "2026-10-06"
+      const viewKey = `viewed_${today}`;
+      const viewedToday = JSON.parse(localStorage.getItem(viewKey) || "[]");
+      
+      if (viewedToday.includes(review.id)) return; // 오늘 이미 본 후기
+      
+      // 조회수 증가
+      viewedToday.push(review.id);
+      localStorage.setItem(viewKey, JSON.stringify(viewedToday));
+      // 어제 날짜 리스트 삭제 (저장소 정리)
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith("viewed_") && k !== viewKey) localStorage.removeItem(k);
+      });
+      
+      await updateDoc(doc(db, "reviews", review.id), {
+        viewCount: increment(1),
+      });
+    } catch (e) {
+      console.warn("조회수 증가 실패:", e);
+    }
+  }, []);
+
 
   // ★ Sales Smartly 채팅 위젯 열기 (사이트 내 채팅창)
   const handleConsult = useCallback((extraInfo = "") => {
@@ -284,7 +327,7 @@ export default function ReviewSection({
               review={review}
               currentUserId={user?.id}
               isGuest={isGuest}
-              onClick={() => setSelectedReview(review)}
+              onClick={() => handleOpenReview(review)}
               onLike={() => handleLike(review.id)}
               onConsult={() => handleConsult(review.managerName)}
               tr={tr}
@@ -454,6 +497,7 @@ export default function ReviewSection({
           isKo={isKo}
           isJa={isJa}
           getRegionName={getRegionName}
+          fakeNicknameOverrides={fakeNicknameOverrides}
         />
       )}
 
@@ -503,7 +547,7 @@ function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult
   const hasLiked = review.likedBy?.includes(currentUserId);
   const isVideo = review.mediaType === "video";
   
-  const maskedNick = maskNickname(review.userNickname || review.userId || "익명");
+  const maskedNick = getFakeNickname(review.userId, fakeNicknameOverrides);
   
   // 시간 표시 (몇 분 전, 몇 시간 전, 며칠 전)
   const getTimeAgo = (timestamp) => {
@@ -584,6 +628,11 @@ function ReviewCard({ review, currentUserId, isGuest, onClick, onLike, onConsult
         <div style={r.interactionBtn}>
           <span style={{ fontSize: 20 }}>💬</span>
           <span style={r.interactionCount}>{review.commentCount || 0}</span>
+        </div>
+        {/* ★ [신규] 조회수 */}
+        <div style={r.interactionBtn}>
+          <span style={{ fontSize: 20 }}>👁️</span>
+          <span style={r.interactionCount}>{(review.viewCount || 0).toLocaleString()}</span>
         </div>
       </div>
 

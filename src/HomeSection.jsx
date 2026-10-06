@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, limit, getDocs, doc } from "firebase/firestore";
 import { db, authReady } from "./firebase";
 import { maskNickname } from "./nicknameUtils";
+import { getFakeNickname } from "./fakeNicknames";
 
 // ★ 지역명 번역 (후기 미리보기용)
 const REGION_TRANSLATION = {
@@ -21,6 +22,22 @@ const REGION_TRANSLATION = {
 function Reveal({ children, delay = 0 }) {
   const ref = useRef(null);
   const [show, setShow] = useState(false);
+
+  // ★ [신규] 가짜 닉네임 오버라이드 로드
+  useEffect(() => {
+    let cancelled = false;
+    authReady.then(async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "global"));
+        if (snap.exists() && !cancelled) {
+          setFakeNicknameOverrides(snap.data().fakeNicknameOverrides || {});
+        }
+      } catch (e) {
+        console.warn("overrides 로드 실패:", e);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const el = ref.current;
@@ -325,7 +342,7 @@ export default function HomeSection({
                     “{text.length > 70 ? text.slice(0, 70) + "..." : text}”
                   </div>
                   <div style={h.reviewMeta}>
-                    {maskNickname(rv.userNickname || rv.userId || "익명")}
+                    {getFakeNickname(rv.userId, fakeNicknameOverrides)}
                     {(rv.loc || rv.region) ? ` · ${getRegionName(rv.loc || rv.region)}` : ""}
                   </div>
                 </div>
