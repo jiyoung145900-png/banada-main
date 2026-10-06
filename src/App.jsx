@@ -298,48 +298,39 @@ export default function App() {
     }
 
     try {
-      await authReady;
-      const userRef = doc(db, "users", id);
-      const userSnap = await getDoc(userRef);
+      // ★ [보안] 서버 함수로 로그인 - 비밀번호가 브라우저에 노출되지 않음
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, pw }),
+      });
+      const result = await res.json();
 
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
-
-        if (userData.banned === true) {
-          const reason = userData.bannedReason
-            ? `\n\n사유: ${userData.bannedReason}`
-            : "";
-          alert(`🚫 접속이 차단된 회원입니다.${reason}\n\n관리자에게 문의해주세요.`);
-          return;
-        }
-
-        if (userData.password === pw) {
-          setCurrentUser(userData);
-          setLoggedIn(true);
-          setIsGuest(false);
-          setShowWelcome(true);
-          
-          try {
-            updateDoc(userRef, { lastActive: Date.now() });
-          } catch (histErr) {}
+      if (!res.ok || !result.success) {
+        // 서버가 banned 체크도 하면 좋지만, 지금은 서버에서 한꺼번에 처리
+        if (result.error && result.error.includes("차단")) {
+          alert(`🚫 ${result.error}`);
         } else {
-          alert(t.login_fail || "비밀번호가 일치하지 않습니다.");
+          alert(result.error || t.login_fail || "로그인 실패");
         }
-      } else {
-        const localUser = users.find(u => u.id === id && u.pw === pw);
-        if (localUser) {
-          await setDoc(doc(db, "users", id), localUser, { merge: true });
-          setCurrentUser(localUser);
-          setLoggedIn(true);
-          setIsGuest(false);
-          setShowWelcome(true);
-        } else {
-          alert(t.login_fail || "존재하지 않는 아이디입니다.");
-        }
+        return;
       }
+
+      // 로그인 성공 - 서버가 비밀번호 뺀 유저 정보 반환
+      setCurrentUser(result.user);
+      setLoggedIn(true);
+      setIsGuest(false);
+      setShowWelcome(true);
+
+      // lastActive 업데이트 (실패해도 무시)
+      try {
+        await authReady;
+        updateDoc(doc(db, "users", id), { lastActive: Date.now() });
+      } catch (histErr) {}
+
     } catch (e) {
-      console.error(e);
-      alert("Login Error");
+      console.error("로그인 오류:", e);
+      alert("로그인 오류 - 네트워크를 확인하세요");
     }
   };
 
