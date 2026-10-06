@@ -40,6 +40,7 @@ export default function ReviewSection({
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [selectedReview, setSelectedReview] = useState(null);
+  const [fakeNicknameOverrides, setFakeNicknameOverrides] = useState({}); // ★ [신규] 가짜 닉네임 오버라이드
   const [sortMode, setSortMode] = useState("latest"); // latest | popular
   
   // ★ [신규] PIN 입력 관련 state

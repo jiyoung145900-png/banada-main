@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { collection, query, orderBy, limit, getDocs, doc } from "firebase/firestore";
+import { collection, query, orderBy, limit, getDocs, getDoc, doc } from "firebase/firestore";
 import { db, authReady } from "./firebase";
 import { maskNickname } from "./nicknameUtils";
 import { getFakeNickname } from "./fakeNicknames";
@@ -22,22 +22,6 @@ const REGION_TRANSLATION = {
 function Reveal({ children, delay = 0 }) {
   const ref = useRef(null);
   const [show, setShow] = useState(false);
-
-  // ★ [신규] 가짜 닉네임 오버라이드 로드
-  useEffect(() => {
-    let cancelled = false;
-    authReady.then(async () => {
-      try {
-        const snap = await getDoc(doc(db, "settings", "global"));
-        if (snap.exists() && !cancelled) {
-          setFakeNicknameOverrides(snap.data().fakeNicknameOverrides || {});
-        }
-      } catch (e) {
-        console.warn("overrides 로드 실패:", e);
-      }
-    });
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     const el = ref.current;
@@ -92,6 +76,7 @@ export default function HomeSection({
 }) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [reviews, setReviews] = useState([]);
+  const [fakeNicknameOverrides, setFakeNicknameOverrides] = useState({});
   const [openCard, setOpenCard] = useState(null); // 서비스 카드 펼침 (null | 0 | 1 | 2)
 
   // ★ 언어 헬퍼
@@ -121,6 +106,22 @@ export default function HomeSection({
         if (!cancelled) setReviews(list);
       } catch (e) {
         console.warn("홈 후기 미리보기 로드 실패:", e);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // ★ 가짜 닉네임 오버라이드 로드
+  useEffect(() => {
+    let cancelled = false;
+    authReady.then(async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "global"));
+        if (snap.exists() && !cancelled) {
+          setFakeNicknameOverrides(snap.data().fakeNicknameOverrides || {});
+        }
+      } catch (e) {
+        console.warn("overrides 로드 실패:", e);
       }
     });
     return () => { cancelled = true; };
