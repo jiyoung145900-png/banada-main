@@ -145,7 +145,7 @@ export default function ReviewDetailModal({
           {isOwnReview ? (
             <button style={d.deleteBtn} onClick={onDelete}>🗑️</button>
           ) : (
-            <div style={{width: 30}}></div>
+            <div style={{width: 44, height: 44}}></div>
           )}
         </div>
 
@@ -336,13 +336,17 @@ const d = {
     overflow: 'hidden',
   },
   header: {
-    // ★ [수정] 아이폰 노치/다이나믹아일랜드 영역을 피해서 header 위치
-    //   모든 아이폰 기종(SE/mini/일반/Pro/Pro Max) 자동 대응
-    //   (modal이 flex column + overflow:hidden 이라 header는 자연히 상단 고정)
-    padding: '16px 20px',
-    paddingTop: 'calc(16px + env(safe-area-inset-top))',
-    paddingLeft: 'max(20px, env(safe-area-inset-left))',
-    paddingRight: 'max(20px, env(safe-area-inset-right))',
+    // ★ [수정v2] 아이폰 노치/다이나믹아일랜드 영역 공식 개선
+    //   max(20px, calc(env + 12px)) → safe-area가 0이어도 최소 20px 보장
+    //   아이폰 기종별 safe-area 값:
+    //     - iPhone SE: 0 → padding 20px 적용
+    //     - iPhone 14: 47px → padding 59px 적용
+    //     - iPhone 14 Pro (다이나믹아일랜드): 59px → padding 71px 적용
+    //   모든 기종에서 ❮ 버튼이 노치 밑에 충분한 여유를 두고 배치됨
+    padding: '12px 16px',
+    paddingTop: 'max(20px, calc(env(safe-area-inset-top) + 12px))',
+    paddingLeft: 'max(16px, env(safe-area-inset-left))',
+    paddingRight: 'max(16px, env(safe-area-inset-right))',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -351,27 +355,48 @@ const d = {
     flexShrink: 0,
   },
   closeBtn: {
-    width: 30, height: 30,
+    // ★ [수정v2] 44x44 iOS HIG 표준 터치 영역 + flex 중앙 정렬
+    //   30x30 fontSize:22 상태에서 ❮ 글자가 버튼 밖으로 삐져나와 잘려 보이던 문제 해결
+    width: 44,
+    height: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     background: 'transparent',
     color: '#fff',
     border: 'none',
-    fontSize: 22,
-    fontWeight: 700,
+    fontSize: 30,
+    fontWeight: 400,
+    lineHeight: 1,
     cursor: 'pointer',
+    padding: 0,
+    marginLeft: -8, // 왼쪽 끝에 가깝게 → 엄지 접근성
+    WebkitTapHighlightColor: 'transparent',
   },
   headerTitle: {
     color: '#fff',
     fontSize: 15,
     fontWeight: 800,
     letterSpacing: 1,
+    flex: 1,
+    textAlign: 'center',
   },
   deleteBtn: {
-    width: 30, height: 30,
+    // ★ [수정v2] closeBtn과 대칭되는 44x44 터치 영역
+    width: 44,
+    height: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     background: 'transparent',
     color: '#ff4444',
     border: 'none',
-    fontSize: 16,
+    fontSize: 20,
+    lineHeight: 1,
     cursor: 'pointer',
+    padding: 0,
+    marginRight: -8,
+    WebkitTapHighlightColor: 'transparent',
   },
   body: {
     flex: 1,

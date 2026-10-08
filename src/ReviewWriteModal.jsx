@@ -187,7 +187,7 @@ export default function ReviewWriteModal({
             <div style={w.headerTitle}>
               {tr("후기 작성", "レビュー作成", "Write Review")}
             </div>
-            <div style={{width: 30}}></div>
+            <div style={{width: 44, height: 44}}></div>
           </div>
 
           <div style={w.stepIndicator}>
@@ -280,7 +280,7 @@ export default function ReviewWriteModal({
           <div style={w.headerTitle}>
             {tr("후기 작성", "レビュー作成", "Write Review")}
           </div>
-          <div style={{width: 30}}></div>
+          <div style={{width: 44, height: 44}}></div>
         </div>
 
         <div style={w.stepIndicator}>
@@ -446,7 +446,7 @@ export default function ReviewWriteModal({
                 <div style={w.headerTitle}>
                   {tr("매니저 선택", "マネージャー選択", "Choose Manager")}
                 </div>
-                <div style={{width: 30}}></div>
+                <div style={{width: 44, height: 44}}></div>
               </div>
 
               <div style={w.searchWrap}>
@@ -535,12 +535,17 @@ const w = {
     position: 'relative',
   },
   header: {
-    // ★ [수정] 아이폰 노치/다이나믹아일랜드 영역을 피해서 header 위치
-    //   모든 아이폰 기종(SE/mini/일반/Pro/Pro Max) 자동 대응
-    padding: '18px 20px',
-    paddingTop: 'calc(18px + env(safe-area-inset-top))',
-    paddingLeft: 'max(20px, env(safe-area-inset-left))',
-    paddingRight: 'max(20px, env(safe-area-inset-right))',
+    // ★ [수정v2] 아이폰 노치/다이나믹아일랜드 영역 공식 개선
+    //   max(20px, calc(env + 12px)) → safe-area가 0이어도 최소 20px 보장
+    //   아이폰 기종별 safe-area 값:
+    //     - iPhone SE: 0 → padding 20px 적용
+    //     - iPhone 14: 47px → padding 59px 적용
+    //     - iPhone 14 Pro (다이나믹아일랜드): 59px → padding 71px 적용
+    //   모든 기종에서 ❮/✕ 버튼이 노치 밑에 충분한 여유를 두고 배치됨
+    padding: '12px 16px',
+    paddingTop: 'max(20px, calc(env(safe-area-inset-top) + 12px))',
+    paddingLeft: 'max(16px, env(safe-area-inset-left))',
+    paddingRight: 'max(16px, env(safe-area-inset-right))',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -548,19 +553,31 @@ const w = {
     flexShrink: 0,
   },
   closeBtn: {
-    width: 30, height: 30,
+    // ★ [수정v2] 44x44 iOS HIG 표준 터치 영역 + flex 중앙 정렬
+    //   30x30 fontSize:18 상태에서 ✕/❮ 글자가 노치 아래 작게 보여 잘려 보이던 문제 해결
+    width: 44,
+    height: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     background: 'transparent',
     color: '#fff',
     border: 'none',
-    fontSize: 18,
-    fontWeight: 700,
+    fontSize: 24, // ✕는 글자가 크니 fontSize를 좀 낮게 (❮는 30으로 자동 조정됨)
+    fontWeight: 400,
+    lineHeight: 1,
     cursor: 'pointer',
+    padding: 0,
+    marginLeft: -8,
+    WebkitTapHighlightColor: 'transparent',
   },
   headerTitle: {
     color: '#fff',
     fontSize: 15,
     fontWeight: 800,
     letterSpacing: 1,
+    flex: 1,
+    textAlign: 'center',
   },
   stepIndicator: {
     display: 'flex',
