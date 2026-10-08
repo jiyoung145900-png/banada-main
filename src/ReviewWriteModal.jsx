@@ -535,11 +535,17 @@ const w = {
     position: 'relative',
   },
   header: {
+    // ★ [수정] 아이폰 노치/다이나믹아일랜드 영역을 피해서 header 위치
+    //   모든 아이폰 기종(SE/mini/일반/Pro/Pro Max) 자동 대응
     padding: '18px 20px',
+    paddingTop: 'calc(18px + env(safe-area-inset-top))',
+    paddingLeft: 'max(20px, env(safe-area-inset-left))',
+    paddingRight: 'max(20px, env(safe-area-inset-right))',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottom: '1px solid #1a1a1a',
+    flexShrink: 0,
   },
   closeBtn: {
     width: 30, height: 30,
@@ -811,8 +817,10 @@ const w = {
   },
   footer: {
     padding: 20,
+    paddingBottom: 'calc(20px + env(safe-area-inset-bottom))', // ★ [신규] 아이폰 홈 인디케이터 피하기
     borderTop: '1px solid #1a1a1a',
     background: '#0f0f0f',
+    flexShrink: 0,
   },
   nextBtn: {
     width: '100%',

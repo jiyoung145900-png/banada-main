@@ -336,12 +336,19 @@ const d = {
     overflow: 'hidden',
   },
   header: {
+    // ★ [수정] 아이폰 노치/다이나믹아일랜드 영역을 피해서 header 위치
+    //   모든 아이폰 기종(SE/mini/일반/Pro/Pro Max) 자동 대응
+    //   (modal이 flex column + overflow:hidden 이라 header는 자연히 상단 고정)
     padding: '16px 20px',
+    paddingTop: 'calc(16px + env(safe-area-inset-top))',
+    paddingLeft: 'max(20px, env(safe-area-inset-left))',
+    paddingRight: 'max(20px, env(safe-area-inset-right))',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottom: '1px solid #1a1a1a',
     background: '#0a0a0a',
+    flexShrink: 0,
   },
   closeBtn: {
     width: 30, height: 30,

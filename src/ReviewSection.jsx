@@ -255,10 +255,10 @@ export default function ReviewSection({
   }, [telegramLink, isKo, isJa]);
 
   return (
-    <div style={{ ...r.container, paddingTop: 0 }}>
+    <div style={r.container}>
       {/* ===== [신규] iOS 스타일 상단 바 - 뒤로가기 + 타이틀 ===== */}
-      {/*   아이폰 노치/다이나믹아일랜드 영역을 env(safe-area-inset-top)으로 밀어줌  */}
-      {/*   모든 아이폰 기종(SE/mini/Pro/Pro Max/Dynamic Island) 자동 대응  */}
+      {/*   position: fixed + maxWidth 500 중앙 정렬로 r.container padding과 독립  */}
+      {/*   모든 아이폰 기종(SE/mini/Pro/Pro Max/Dynamic Island) safe-area 자동 처리  */}
       <div style={topBarStyles.wrap}>
         <button
           type="button"
@@ -273,6 +273,8 @@ export default function ReviewSection({
         </div>
         <div style={topBarStyles.rightSpacer} />
       </div>
+      {/* 고정 바 높이만큼 콘텐츠를 아래로 밀어주는 스페이서 */}
+      <div style={topBarStyles.spacer} />
 
       {/* ===== 상단 헤더 - 상담 배너 ===== */}
       <div style={r.consultBanner} onClick={() => handleConsult()}>
@@ -799,27 +801,40 @@ const pinS = {
 // =========================================================================
 // ★ [신규] iOS 스타일 상단 뒤로가기 바 스타일
 // -------------------------------------------------------------------------
-// 모든 아이폰(SE/mini/일반/Pro/Pro Max/다이나믹아일랜드) safe-area 자동 처리
+// Dashboard의 bottomNav와 동일 패턴:
+//   position: fixed + left:50% + translateX(-50%) + maxWidth:500
+//   → r.container의 좌우 padding과 완전히 독립, 전체 폭(최대 500px) 사용
+//   → 모든 아이폰(SE/mini/일반/Pro/Pro Max/다이나믹아일랜드) safe-area 자동 처리
 // =========================================================================
+const TOP_BAR_HEIGHT = 48; // 바 자체 높이 (safe-area 제외)
+
 const topBarStyles = {
   wrap: {
-    position: 'sticky',
+    position: 'fixed',
     top: 0,
-    zIndex: 50,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: '100%',
+    maxWidth: 500,
+    zIndex: 100,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0 8px',
     paddingTop: 'env(safe-area-inset-top)',
-    minHeight: 'calc(48px + env(safe-area-inset-top))',
+    paddingLeft: 'max(8px, env(safe-area-inset-left))',
+    paddingRight: 'max(8px, env(safe-area-inset-right))',
+    minHeight: `calc(${TOP_BAR_HEIGHT}px + env(safe-area-inset-top))`,
+    boxSizing: 'border-box',
     background: 'rgba(8, 8, 8, 0.92)',
     backdropFilter: 'blur(14px)',
     WebkitBackdropFilter: 'blur(14px)',
     borderBottom: '1px solid rgba(255,255,255,0.04)',
-    marginLeft: -16,  // r.container의 좌우 padding(16px) 상쇄용
-    marginRight: -16,
-    paddingLeft: 'max(8px, env(safe-area-inset-left))',
-    paddingRight: 'max(8px, env(safe-area-inset-right))',
+  },
+  // 콘텐츠가 상단 바 아래에서 시작하도록 밀어주는 스페이서 (container 안 첫 요소)
+  spacer: {
+    width: '100%',
+    height: `calc(${TOP_BAR_HEIGHT}px + env(safe-area-inset-top))`,
   },
   backBtn: {
     width: 40,
@@ -839,7 +854,7 @@ const topBarStyles = {
     lineHeight: 1,
     color: '#fff',
     fontWeight: 300,
-    marginTop: -4, // 시각적 중앙 보정
+    marginTop: -4,
   },
   title: {
     flex: 1,
@@ -850,7 +865,7 @@ const topBarStyles = {
     letterSpacing: 0.3,
   },
   rightSpacer: {
-    width: 40, // backBtn 폭과 동일하게 두어서 타이틀 가운데 정렬 유지
+    width: 40,
     height: 40,
   },
 };

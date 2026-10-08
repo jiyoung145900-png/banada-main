@@ -45,8 +45,8 @@ export default function AboutBanadaSection({ t, user, isGuest, onBack }) {
   return (
     <div style={s.container}>
       {/* ===== [신규] iOS 스타일 상단 바 - 뒤로가기 + 타이틀 ===== */}
-      {/*   아이폰 노치/다이나믹아일랜드 영역을 env(safe-area-inset-top)으로 밀어줌  */}
-      {/*   모든 아이폰 기종(SE/mini/Pro/Pro Max/Dynamic Island) 자동 대응  */}
+      {/*   position: fixed + maxWidth 500 중앙 정렬로 container padding과 독립  */}
+      {/*   모든 아이폰 기종(SE/mini/Pro/Pro Max/Dynamic Island) safe-area 자동 처리  */}
       <div style={s.topBar}>
         <button
           type="button"
@@ -61,6 +61,8 @@ export default function AboutBanadaSection({ t, user, isGuest, onBack }) {
         </div>
         <div style={s.topRightSpacer} />
       </div>
+      {/* 고정 바 높이만큼 콘텐츠를 아래로 밀어주는 스페이서 */}
+      <div style={s.topBarSpacer} />
 
       {/* 상단 헤더 */}
       <div style={s.header}>
@@ -153,26 +155,35 @@ const s = {
   },
 
   // ===== ★ [신규] iOS 스타일 상단 바 =====
-  // 모든 아이폰(SE/mini/일반/Pro/Pro Max/다이나믹아일랜드) safe-area 자동 처리
+  // Dashboard의 bottomNav와 동일 패턴: fixed + maxWidth 500 중앙 정렬
+  // → container padding과 완전히 독립, 좌우 어긋남 없음
+  // → 모든 아이폰(SE/mini/일반/Pro/Pro Max/다이나믹아일랜드) safe-area 자동 처리
   topBar: {
-    position: 'sticky',
+    position: 'fixed',
     top: 0,
-    zIndex: 50,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: '100%',
+    maxWidth: 500,
+    zIndex: 100,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0 8px',
     paddingTop: 'env(safe-area-inset-top)',
+    paddingLeft: 'max(8px, env(safe-area-inset-left))',
+    paddingRight: 'max(8px, env(safe-area-inset-right))',
     minHeight: 'calc(48px + env(safe-area-inset-top))',
+    boxSizing: 'border-box',
     background: 'rgba(8, 8, 8, 0.92)',
     backdropFilter: 'blur(14px)',
     WebkitBackdropFilter: 'blur(14px)',
     borderBottom: '1px solid rgba(255,255,255,0.04)',
-    marginLeft: -16,  // container 좌우 padding(16px) 상쇄
-    marginRight: -16,
-    paddingLeft: 'max(8px, env(safe-area-inset-left))',
-    paddingRight: 'max(8px, env(safe-area-inset-right))',
-    marginBottom: 8,
+  },
+  // 고정 바 높이만큼 콘텐츠를 아래로 밀어주는 스페이서
+  topBarSpacer: {
+    width: '100%',
+    height: 'calc(48px + env(safe-area-inset-top))',
   },
   topBackBtn: {
     width: 40,
