@@ -4,7 +4,7 @@ import { db, authReady } from "./firebase";
 
 // ★ BANADA 회사 소개 - 인스타 스타일 베너 게시판
 // Admin에서 이미지만 업로드하면 세로로 쭉 표시
-export default function AboutBanadaSection({ t, user, isGuest }) {
+export default function AboutBanadaSection({ t, user, isGuest, onBack }) {
   const [banners, setBanners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null); // 확대보기
@@ -34,8 +34,34 @@ export default function AboutBanadaSection({ t, user, isGuest }) {
     return () => unsub();
   }, []);
 
+  // ★★★ [신규] 상단 < 버튼용 뒤로가기 핸들러
+  //   확대보기 열려있으면 그거 먼저 닫기, 아니면 Dashboard goBack 또는 history.back()
+  const handleTopBack = () => {
+    if (selectedImage) { setSelectedImage(null); return; }
+    if (typeof onBack === 'function') { onBack(); return; }
+    if (typeof window !== 'undefined' && window.history) window.history.back();
+  };
+
   return (
     <div style={s.container}>
+      {/* ===== [신규] iOS 스타일 상단 바 - 뒤로가기 + 타이틀 ===== */}
+      {/*   아이폰 노치/다이나믹아일랜드 영역을 env(safe-area-inset-top)으로 밀어줌  */}
+      {/*   모든 아이폰 기종(SE/mini/Pro/Pro Max/Dynamic Island) 자동 대응  */}
+      <div style={s.topBar}>
+        <button
+          type="button"
+          onClick={handleTopBack}
+          style={s.topBackBtn}
+          aria-label="back"
+        >
+          <span style={s.topBackArrow}>‹</span>
+        </button>
+        <div style={s.topTitle}>
+          {tr("기업정보", "企業情報", "ABOUT")}
+        </div>
+        <div style={s.topRightSpacer} />
+      </div>
+
       {/* 상단 헤더 */}
       <div style={s.header}>
         <div style={s.headerLabel}>ABOUT BANADA</div>
@@ -123,8 +149,64 @@ const s = {
   container: {
     minHeight: '100vh',
     background: '#080808',
-    padding: '20px 16px 20px',
+    padding: '0 16px 20px', // ★ [변경] 상단 padding 0 → 상단 바가 자체 safe-area 처리
   },
+
+  // ===== ★ [신규] iOS 스타일 상단 바 =====
+  // 모든 아이폰(SE/mini/일반/Pro/Pro Max/다이나믹아일랜드) safe-area 자동 처리
+  topBar: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 50,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0 8px',
+    paddingTop: 'env(safe-area-inset-top)',
+    minHeight: 'calc(48px + env(safe-area-inset-top))',
+    background: 'rgba(8, 8, 8, 0.92)',
+    backdropFilter: 'blur(14px)',
+    WebkitBackdropFilter: 'blur(14px)',
+    borderBottom: '1px solid rgba(255,255,255,0.04)',
+    marginLeft: -16,  // container 좌우 padding(16px) 상쇄
+    marginRight: -16,
+    paddingLeft: 'max(8px, env(safe-area-inset-left))',
+    paddingRight: 'max(8px, env(safe-area-inset-right))',
+    marginBottom: 8,
+  },
+  topBackBtn: {
+    width: 40,
+    height: 40,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    color: '#fff',
+    WebkitTapHighlightColor: 'transparent',
+  },
+  topBackArrow: {
+    fontSize: 34,
+    lineHeight: 1,
+    color: '#fff',
+    fontWeight: 300,
+    marginTop: -4,
+  },
+  topTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 700,
+    letterSpacing: 0.3,
+  },
+  topRightSpacer: {
+    width: 40,
+    height: 40,
+  },
+
   // 헤더
   header: {
     textAlign: 'center',
@@ -214,6 +296,7 @@ const s = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+    paddingTop: 'calc(20px + env(safe-area-inset-top))', // ★ [신규] 아이폰 노치 아래로 X 버튼 위치
     backdropFilter: 'blur(10px)',
   },
   modalImage: {
@@ -224,8 +307,8 @@ const s = {
   },
   modalClose: {
     position: 'absolute',
-    top: 20,
-    right: 20,
+    top: 'calc(20px + env(safe-area-inset-top))', // ★ [신규] 아이폰 노치 피하기
+    right: 'calc(20px + env(safe-area-inset-right))',
     width: 44,
     height: 44,
     borderRadius: '50%',

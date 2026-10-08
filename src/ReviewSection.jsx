@@ -33,7 +33,8 @@ export default function ReviewSection({
   members = [], 
   telegramLink = "",
   reviewAccessCode = "", // ★ [신규] 후기 작성 가능 추천코드
-  backHandlerRef 
+  backHandlerRef,
+  onBack // ★ [신규] 뒤로가기 핸들러 (Dashboard의 goBack). 없으면 history.back() 사용
 }) {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -99,6 +100,15 @@ export default function ReviewSection({
       }
     };
   }, [showWriteModal, selectedReview, backHandlerRef]);
+
+  // ★★★ [신규] 상단 < 버튼용 뒤로가기 핸들러
+  //   모달 열려있으면 모달 먼저 닫기, 아니면 Dashboard goBack 또는 history.back()
+  const handleTopBack = () => {
+    if (showWriteModal) { setShowWriteModal(false); return; }
+    if (selectedReview) { setSelectedReview(null); return; }
+    if (typeof onBack === 'function') { onBack(); return; }
+    if (typeof window !== 'undefined' && window.history) window.history.back();
+  };
 
   // ★ Firestore에서 후기 실시간 로드
   useEffect(() => {
@@ -245,7 +255,25 @@ export default function ReviewSection({
   }, [telegramLink, isKo, isJa]);
 
   return (
-    <div style={r.container}>
+    <div style={{ ...r.container, paddingTop: 0 }}>
+      {/* ===== [신규] iOS 스타일 상단 바 - 뒤로가기 + 타이틀 ===== */}
+      {/*   아이폰 노치/다이나믹아일랜드 영역을 env(safe-area-inset-top)으로 밀어줌  */}
+      {/*   모든 아이폰 기종(SE/mini/Pro/Pro Max/Dynamic Island) 자동 대응  */}
+      <div style={topBarStyles.wrap}>
+        <button
+          type="button"
+          onClick={handleTopBack}
+          style={topBarStyles.backBtn}
+          aria-label="back"
+        >
+          <span style={topBarStyles.backArrow}>‹</span>
+        </button>
+        <div style={topBarStyles.title}>
+          {tr("후기", "レビュー", "REVIEWS")}
+        </div>
+        <div style={topBarStyles.rightSpacer} />
+      </div>
+
       {/* ===== 상단 헤더 - 상담 배너 ===== */}
       <div style={r.consultBanner} onClick={() => handleConsult()}>
         <div style={r.consultBannerInner}>
@@ -765,5 +793,64 @@ const pinS = {
     fontSize: 15,
     fontWeight: 800,
     cursor: 'pointer',
+  },
+};
+
+// =========================================================================
+// ★ [신규] iOS 스타일 상단 뒤로가기 바 스타일
+// -------------------------------------------------------------------------
+// 모든 아이폰(SE/mini/일반/Pro/Pro Max/다이나믹아일랜드) safe-area 자동 처리
+// =========================================================================
+const topBarStyles = {
+  wrap: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 50,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0 8px',
+    paddingTop: 'env(safe-area-inset-top)',
+    minHeight: 'calc(48px + env(safe-area-inset-top))',
+    background: 'rgba(8, 8, 8, 0.92)',
+    backdropFilter: 'blur(14px)',
+    WebkitBackdropFilter: 'blur(14px)',
+    borderBottom: '1px solid rgba(255,255,255,0.04)',
+    marginLeft: -16,  // r.container의 좌우 padding(16px) 상쇄용
+    marginRight: -16,
+    paddingLeft: 'max(8px, env(safe-area-inset-left))',
+    paddingRight: 'max(8px, env(safe-area-inset-right))',
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    color: '#fff',
+    WebkitTapHighlightColor: 'transparent',
+  },
+  backArrow: {
+    fontSize: 34,
+    lineHeight: 1,
+    color: '#fff',
+    fontWeight: 300,
+    marginTop: -4, // 시각적 중앙 보정
+  },
+  title: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 700,
+    letterSpacing: 0.3,
+  },
+  rightSpacer: {
+    width: 40, // backBtn 폭과 동일하게 두어서 타이틀 가운데 정렬 유지
+    height: 40,
   },
 };
