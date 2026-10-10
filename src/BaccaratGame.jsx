@@ -1,5 +1,5 @@
 // ===================================================================
-// 🎰 BaccaratGame - 바카라 미니게임 (사이트 전용)
+// 🎰 BaccaratGame - 바카라 미니게임 (서비스 수준)
 // ===================================================================
 // Props:
 //   points: 현재 포인트
@@ -36,7 +36,6 @@ function playBaccarat() {
   let pScore = handScore(player);
   let bScore = handScore(banker);
 
-  // Natural (8,9)
   if (pScore >= 8 || bScore >= 8) return { player, banker, pScore, bScore };
 
   let playerThird = null;
@@ -71,12 +70,12 @@ export default function BaccaratGame({ points, onPointsChange, onBack }) {
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
   const [cardAnimation, setCardAnimation] = useState({});
+  const [chips, setChips] = useState([]);
 
   const canPlay = points >= bet && side && !isPlaying;
   const canvasRef = useRef(null);
   const audioCtxRef = useRef(null);
 
-  // 오디오 초기화
   useEffect(() => {
     audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
   }, []);
@@ -90,36 +89,33 @@ export default function BaccaratGame({ points, onPointsChange, onBack }) {
     gain.connect(ctx.destination);
 
     if (type === "win") {
-      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.setValueAtTime(920, ctx.currentTime);
       gain.gain.value = 0.6;
       osc.type = "sine";
       osc.start();
-      setTimeout(() => osc.stop(), 180);
+      setTimeout(() => osc.stop(), 220);
     } else if (type === "bet") {
-      osc.frequency.setValueAtTime(420, ctx.currentTime);
-      gain.gain.value = 0.4;
+      osc.frequency.setValueAtTime(480, ctx.currentTime);
+      gain.gain.value = 0.45;
       osc.type = "sawtooth";
       osc.start();
-      setTimeout(() => osc.stop(), 120);
+      setTimeout(() => osc.stop(), 140);
     } else if (type === "tie") {
       osc.frequency.setValueAtTime(680, ctx.currentTime);
       gain.gain.value = 0.5;
       osc.type = "sine";
       osc.start();
-      setTimeout(() => osc.stop(), 80);
+      setTimeout(() => osc.stop(), 90);
     }
   };
 
-  const getWinner = (p, b) => {
-    if (p > b) return "player";
-    if (b > p) return "banker";
-    return "tie";
-  };
+  const getWinner = (p, b) => (p > b ? "player" : b > p ? "banker" : "tie");
 
   const handlePlay = async () => {
     if (!canPlay) return;
     setIsPlaying(true);
     setResult(null);
+    setChips([]);
     playSound("bet");
 
     // 카드 뒤집기 애니메이션
@@ -135,7 +131,7 @@ export default function BaccaratGame({ points, onPointsChange, onBack }) {
       bScore: null,
     });
 
-    await new Promise(r => setTimeout(r, 1200));
+    await new Promise(r => setTimeout(r, 1300));
 
     const game = playBaccarat();
     const winner = getWinner(game.pScore, game.bScore);
@@ -173,14 +169,34 @@ export default function BaccaratGame({ points, onPointsChange, onBack }) {
     setCardAnimation({});
   };
 
-  // Canvas로 카드 뒤집기 애니메이션 (파티클)
+  // 칩 베팅 애니메이션
+  useEffect(() => {
+    if (result || isPlaying) return;
+    if (side && bet) {
+      setChips(prev => {
+        const newChip = {
+          id: Date.now(),
+          x: 80 + Math.random() * 80,
+          y: 90,
+          size: 38,
+          color: side === "player" ? "#3B82F6" : side === "banker" ? "#E63975" : "#D4A574",
+        };
+        return [...prev, newChip];
+      });
+      setTimeout(() => {
+        setChips(prev => prev.slice(1));
+      }, 600);
+    }
+  }, [side, bet, result, isPlaying]);
+
+  // Canvas 애니메이션 (파티클 + 뒤집기)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !result) return;
 
     const ctx = canvas.getContext("2d");
-    canvas.width = 240;
-    canvas.height = 140;
+    canvas.width = 280;
+    canvas.height = 170;
 
     const animate = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -190,23 +206,23 @@ export default function BaccaratGame({ points, onPointsChange, onBack }) {
 
       // Player
       pCards.forEach((card, i) => {
-        const y = i * 28;
         const flip = cardAnimation.player?.[i]?.back ? 1 : 0;
+        const x = 50 + i * 32;
         ctx.save();
-        ctx.translate(50, 20 + y);
+        ctx.translate(x, 28);
         ctx.scale(flip, 1);
-        ctx.drawImage(canvasRef.current, 0, 0, 60, 85); // 임시
+        ctx.drawImage(canvasRef.current, 0, 0, 58, 82);
         ctx.restore();
       });
 
       // Banker
       bCards.forEach((card, i) => {
-        const y = i * 28;
         const flip = cardAnimation.banker?.[i]?.back ? 1 : 0;
+        const x = 140 + i * 32;
         ctx.save();
-        ctx.translate(140, 20 + y);
+        ctx.translate(x, 28);
         ctx.scale(flip, 1);
-        ctx.drawImage(canvasRef.current, 0, 0, 60, 85);
+        ctx.drawImage(canvasRef.current, 0, 0, 58, 82);
         ctx.restore();
       });
 
@@ -352,6 +368,24 @@ export default function BaccaratGame({ points, onPointsChange, onBack }) {
           </button>
         )}
       </div>
+
+      {/* 베팅 칩 애니메이션 */}
+      {chips.map((chip) => (
+        <div
+          key={chip.id}
+          style={{
+            position: "absolute",
+            left: `${chip.x}px`,
+            top: `${chip.y}px`,
+            fontSize: `${chip.size}px`,
+            transition: "all 0.6s cubic-bezier(0.23, 1, 0.32, 1)",
+            transform: "translateY(-40px)",
+            zIndex: 30,
+          }}
+        >
+          {chip.size >= 48 ? "💎" : chip.size >= 36 ? "💰" : "🎰"}
+        </div>
+      ))}
     </div>
   );
 }
@@ -374,7 +408,7 @@ function Card({ card, isBack }) {
   );
 }
 
-// 스타일 (더 세련되게)
+// 스타일
 const S = {
   container: { padding: 16, color: "#fff", minHeight: 520 },
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
