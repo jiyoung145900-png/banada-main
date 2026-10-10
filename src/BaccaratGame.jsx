@@ -86,6 +86,111 @@ function playBaccarat() {
   return { player, banker, pScore, bScore };
 }
 
+// --- 카드 중앙 레이아웃 (표준 트럼프 카드 pip 배치) ---
+// 각 핍 좌표: [top%, left%, flipped?]
+// 아래쪽 절반은 flipped=true (뒤집어서 거꾸로 보이게)
+const PIP_LAYOUTS = {
+  "A":  [[50, 50]],
+
+  "2":  [[18, 50], 
+         [82, 50, true]],
+
+  "3":  [[18, 50], 
+         [50, 50], 
+         [82, 50, true]],
+
+  "4":  [[18, 28], [18, 72], 
+         [82, 28, true], [82, 72, true]],
+
+  "5":  [[18, 28], [18, 72], 
+         [50, 50], 
+         [82, 28, true], [82, 72, true]],
+
+  "6":  [[18, 28], [18, 72], 
+         [50, 28], [50, 72], 
+         [82, 28, true], [82, 72, true]],
+
+  "7":  [[18, 28], [18, 72], 
+         [34, 50], 
+         [50, 28], [50, 72], 
+         [82, 28, true], [82, 72, true]],
+
+  "8":  [[18, 28], [18, 72], 
+         [34, 50], 
+         [50, 28], [50, 72], 
+         [66, 50, true], 
+         [82, 28, true], [82, 72, true]],
+
+  "9":  [[18, 28], [18, 72], 
+         [38, 28], [38, 72], 
+         [50, 50], 
+         [62, 28, true], [62, 72, true], 
+         [82, 28, true], [82, 72, true]],
+
+  "10": [[18, 28], [18, 72], 
+         [32, 50], 
+         [44, 28], [44, 72], 
+         [56, 28, true], [56, 72, true], 
+         [68, 50, true], 
+         [82, 28, true], [82, 72, true]],
+};
+
+function CardCenter({ rank, suit, isRed }) {
+  if (!rank || !suit) return null;
+  
+  // J, Q, K는 큰 글자로
+  if (["J", "Q", "K"].includes(rank)) {
+    return (
+      <div style={{ 
+        position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+        fontSize: 32, fontWeight: 900, fontFamily: "serif",
+        color: isRed ? "#E63975" : "#1F0817",
+        letterSpacing: -2,
+      }}>
+        {rank}
+      </div>
+    );
+  }
+  
+  // A, 2~10 → 핍 배치
+  const pips = PIP_LAYOUTS[rank];
+  if (!pips) return null;
+  
+  // A는 중앙에 큰 무늬 하나
+  if (rank === "A") {
+    return (
+      <div style={{ 
+        position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+        fontSize: 32,
+      }}>
+        {suit}
+      </div>
+    );
+  }
+  
+  // 2~10 → 숫자만큼 무늬 배치
+  return (
+    <>
+      {pips.map(([topPct, leftPct, flipped], i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            top: `${topPct}%`,
+            left: `${leftPct}%`,
+            transform: `translate(-50%, -50%) ${flipped ? "rotate(180deg)" : ""}`,
+            fontSize: 12,
+            lineHeight: 1,
+            fontWeight: 900,
+          }}
+        >
+          {suit}
+        </div>
+      ))}
+    </>
+  );
+}
+
 // --- 인터랙티브 카드 컴포넌트 (모서리 접기 쪼기) ---
 function Card3D({ card, state, onClick, highlight }) {
   // state: "empty" | "back" | "peek1" | "peek2" | "peek3" | "revealed"
@@ -97,24 +202,24 @@ function Card3D({ card, state, onClick, highlight }) {
     return <div style={{ width: 68, height: 95, margin: "0 4px" }} />;
   }
 
-  // 뒷면의 clip-path (왼쪽 아래 모서리가 점점 많이 접히는 효과)
-  // 접힌 자리에 앞면이 비치며 숫자/무늬가 조금씩 보임
+  // 뒷면의 clip-path (왼쪽 위 모서리가 점점 많이 접히는 효과)
+  // 접힌 자리에 앞면 숫자/무늬 (왼쪽 위에 있음!) 가 드러남
   const backClipPath = {
     back:     "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",                      // 전체 뒷면
-    peek1:    "polygon(0% 0%, 100% 0%, 100% 100%, 32% 100%, 0% 78%)",             // 모서리 살짝 (약 15%)
-    peek2:    "polygon(0% 0%, 100% 0%, 100% 100%, 55% 100%, 0% 55%)",             // 반쯤 (약 30%)
-    peek3:    "polygon(0% 0%, 100% 0%, 100% 100%, 85% 100%, 0% 25%)",             // 많이 (약 50%)
-    revealed: "polygon(0% 0%, 100% 0%, 100% 0%, 0% 0%)",                          // 전부 사라짐
+    peek1:    "polygon(32% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 22%)",             // 모서리 살짝 (약 15%)
+    peek2:    "polygon(55% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 45%)",             // 반쯤 (약 30%)
+    peek3:    "polygon(85% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 75%)",             // 많이 (약 50%)
+    revealed: "polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%)",              // 전부 사라짐
   }[state] || "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
 
-  // 접힌 모서리 효과 (삼각형 그림자)
+  // 접힌 모서리 효과 (삼각형 그림자 - 왼쪽 위에)
   const foldAccent = {
-    back:     "polygon(0% 100%, 0% 100%, 0% 100%)",
-    peek1:    "polygon(0% 78%, 32% 100%, 0% 100%)",
-    peek2:    "polygon(0% 55%, 55% 100%, 0% 100%)",
-    peek3:    "polygon(0% 25%, 85% 100%, 0% 100%)",
+    back:     "polygon(0% 0%, 0% 0%, 0% 0%)",
+    peek1:    "polygon(0% 22%, 32% 0%, 0% 0%)",
+    peek2:    "polygon(0% 45%, 55% 0%, 0% 0%)",
+    peek3:    "polygon(0% 75%, 85% 0%, 0% 0%)",
     revealed: "polygon(0% 0%, 0% 0%, 0% 0%)",
-  }[state] || "polygon(0% 100%, 0% 100%, 0% 100%)";
+  }[state] || "polygon(0% 0%, 0% 0%, 0% 0%)";
 
   return (
     <div
@@ -145,7 +250,7 @@ function Card3D({ card, state, onClick, highlight }) {
           : "0 8px 20px rgba(0,0,0,0.6)",
       }}>
         
-        {/* 📜 아래 레이어: 앞면 (항상 거기 있음, 뒷면이 접히면 보임) */}
+        {/* 📜 아래 레이어: 앞면 (실제 트럼프 카드처럼 무늬 배치) */}
         <div style={{
           position: "absolute",
           top: 0, left: 0,
@@ -156,17 +261,19 @@ function Card3D({ card, state, onClick, highlight }) {
           color: isRed ? "#E63975" : "#1F0817",
           overflow: "hidden",
         }}>
-          <div style={{ position: "absolute", top: 4, left: 6, fontSize: 14, lineHeight: 1, textAlign: "center" }}>
+          {/* 왼쪽 위 랭크/무늬 (쪼일 때 보이는 곳) */}
+          <div style={{ position: "absolute", top: 4, left: 5, fontSize: 13, lineHeight: 1, textAlign: "center", fontFamily: "serif" }}>
             <div style={{ fontWeight: 900 }}>{card?.rank}</div>
-            <div style={{ fontSize: 12 }}>{card?.suit}</div>
+            <div style={{ fontSize: 11 }}>{card?.suit}</div>
           </div>
-          <div style={{ 
-            position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
-            fontSize: 38, opacity: 0.2, fontWeight: 900 
-          }}>{card?.suit}</div>
-          <div style={{ position: "absolute", bottom: 4, right: 6, fontSize: 14, lineHeight: 1, transform: "rotate(180deg)", textAlign: "center" }}>
+          
+          {/* 중앙 - 랭크별 실제 트럼프 카드 레이아웃 */}
+          <CardCenter rank={card?.rank} suit={card?.suit} isRed={isRed} />
+          
+          {/* 오른쪽 아래 랭크/무늬 (뒤집어진 형태) */}
+          <div style={{ position: "absolute", bottom: 4, right: 5, fontSize: 13, lineHeight: 1, transform: "rotate(180deg)", textAlign: "center", fontFamily: "serif" }}>
             <div style={{ fontWeight: 900 }}>{card?.rank}</div>
-            <div style={{ fontSize: 12 }}>{card?.suit}</div>
+            <div style={{ fontSize: 11 }}>{card?.suit}</div>
           </div>
         </div>
 
@@ -212,7 +319,7 @@ function Card3D({ card, state, onClick, highlight }) {
             width: "100%",
             height: "100%",
             borderRadius: 8,
-            background: "linear-gradient(135deg, rgba(0,0,0,0.4), rgba(0,0,0,0.1))",
+            background: "linear-gradient(315deg, rgba(0,0,0,0.4), rgba(0,0,0,0.1))",
             clipPath: foldAccent,
             WebkitClipPath: foldAccent,
             transition: "clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1), -webkit-clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
