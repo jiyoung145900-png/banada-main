@@ -23,7 +23,7 @@ const sanitizeText = (s) =>
     .replace(/\uFEFF/g, "") // BOM
     .trim();
 
-const normalizeId = (s) => sanitizeText(s).toLowerCase();
+const normalizeId = (s) => sanitizeText(s).toLowerCase().replace(/\s/g, '');
 const normalizePw = (s) => sanitizeText(s);
 
 const passOf = (u) => String(u?.password ?? u?.pw ?? "");

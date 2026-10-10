@@ -338,7 +338,11 @@ export default function App() {
   const handleSignupAction = async (id, pw, nickname, referralCode) => {
     if (!id || !pw) return alert(t.input_id_pw || "ID/PW Required");
 
-    const idCheck = validateUserId(id);
+    // ★ 공백 제거 - 중복 가입 방지
+    const idNoSpace = String(id).replace(/\s/g, '');
+    if (!idNoSpace) return alert(t.input_id_pw || "ID required");
+
+    const idCheck = validateUserId(idNoSpace);
     if (!idCheck.ok) return alert(idCheck.reason);
     const pwCheck = validatePassword(pw);
     if (!pwCheck.ok) return alert(pwCheck.reason);
