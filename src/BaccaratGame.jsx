@@ -86,105 +86,106 @@ function playBaccarat() {
   return { player, banker, pScore, bScore };
 }
 
-// --- 인터랙티브 카드 컴포넌트 ---
+// --- 인터랙티브 카드 컴포넌트 (모서리 접기 쪼기) ---
 function Card3D({ card, state, onClick, highlight }) {
-  // state: "empty"(없음) | "back"(뒷면) | "peek"(쪼기 중) | "revealed"(공개)
+  // state: "empty" | "back" | "peek1" | "peek2" | "peek3" | "revealed"
+  // 쪼기 플로우: back → peek1 (살짝) → peek2 (반쯤) → peek3 (많이) → revealed (공개)
   const isRed = card?.suit === "♥" || card?.suit === "♦";
-  const clickable = state === "back" || state === "peek";
+  const clickable = ["back", "peek1", "peek2", "peek3"].includes(state);
 
   if (state === "empty") {
     return <div style={{ width: 68, height: 95, margin: "0 4px" }} />;
   }
 
-  let transform = "rotateY(180deg)";
-  let animation = "none";
+  // 뒷면의 clip-path (왼쪽 아래 모서리가 점점 많이 접히는 효과)
+  // 접힌 자리에 앞면이 비치며 숫자/무늬가 조금씩 보임
+  const backClipPath = {
+    back:     "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",                      // 전체 뒷면
+    peek1:    "polygon(0% 0%, 100% 0%, 100% 100%, 32% 100%, 0% 78%)",             // 모서리 살짝 (약 15%)
+    peek2:    "polygon(0% 0%, 100% 0%, 100% 100%, 55% 100%, 0% 55%)",             // 반쯤 (약 30%)
+    peek3:    "polygon(0% 0%, 100% 0%, 100% 100%, 85% 100%, 0% 25%)",             // 많이 (약 50%)
+    revealed: "polygon(0% 0%, 100% 0%, 100% 0%, 0% 0%)",                          // 전부 사라짐
+  }[state] || "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
 
-  if (state === "back") {
-    animation = "dealIn 0.4s ease-out forwards";
-    transform = "rotateY(180deg)";
-  } else if (state === "peek") {
-    transform = "rotateY(90deg) scale(1.15)";
-  } else if (state === "revealed") {
-    transform = "rotateY(0deg)";
-  }
+  // 접힌 모서리 효과 (삼각형 그림자)
+  const foldAccent = {
+    back:     "polygon(0% 100%, 0% 100%, 0% 100%)",
+    peek1:    "polygon(0% 78%, 32% 100%, 0% 100%)",
+    peek2:    "polygon(0% 55%, 55% 100%, 0% 100%)",
+    peek3:    "polygon(0% 25%, 85% 100%, 0% 100%)",
+    revealed: "polygon(0% 0%, 0% 0%, 0% 0%)",
+  }[state] || "polygon(0% 100%, 0% 100%, 0% 100%)";
 
   return (
     <div
       onClick={clickable ? onClick : undefined}
       style={{
-        perspective: "1200px",
         width: 68,
         height: 95,
         margin: "0 4px",
         cursor: clickable ? "pointer" : "default",
         position: "relative",
+        animation: state === "back" ? "dealIn 0.4s ease-out" : "none",
       }}
     >
-      {state === "back" && (
-        <div style={S.peekHint}>👆</div>
-      )}
-      {state === "peek" && (
+      {/* 쪼기 가능 힌트 */}
+      {state === "back" && <div style={S.peekHint}>👆</div>}
+      {(state === "peek1" || state === "peek2" || state === "peek3") && (
         <div style={{...S.peekHint, color: "#FFD700"}}>👁</div>
       )}
 
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          position: "relative",
-          transformStyle: "preserve-3d",
-          transform: transform,
-          transition: (state === "peek" || state === "revealed") 
-            ? "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)" 
-            : "none",
-          animation: animation,
-          boxShadow: highlight 
-            ? "0 0 20px rgba(255,215,0,0.8), 0 8px 20px rgba(0,0,0,0.6)"
-            : "0 8px 20px rgba(0,0,0,0.6)",
-          borderRadius: 8,
-        }}
-      >
-        {/* 앞면 */}
+      {/* 카드 본체 (2 레이어) */}
+      <div style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        borderRadius: 8,
+        boxShadow: highlight 
+          ? "0 0 20px rgba(255,215,0,0.8), 0 8px 20px rgba(0,0,0,0.6)"
+          : "0 8px 20px rgba(0,0,0,0.6)",
+      }}>
+        
+        {/* 📜 아래 레이어: 앞면 (항상 거기 있음, 뒷면이 접히면 보임) */}
         <div style={{
           position: "absolute",
+          top: 0, left: 0,
           width: "100%",
           height: "100%",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
           borderRadius: 8,
           background: "linear-gradient(145deg, #ffffff, #f0f0f0)",
           color: isRed ? "#E63975" : "#1F0817",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transform: "rotateY(0deg)",
           overflow: "hidden",
         }}>
           <div style={{ position: "absolute", top: 4, left: 6, fontSize: 14, lineHeight: 1, textAlign: "center" }}>
             <div style={{ fontWeight: 900 }}>{card?.rank}</div>
             <div style={{ fontSize: 12 }}>{card?.suit}</div>
           </div>
-          <div style={{ fontSize: 38, opacity: 0.2, fontWeight: 900 }}>{card?.suit}</div>
+          <div style={{ 
+            position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+            fontSize: 38, opacity: 0.2, fontWeight: 900 
+          }}>{card?.suit}</div>
           <div style={{ position: "absolute", bottom: 4, right: 6, fontSize: 14, lineHeight: 1, transform: "rotate(180deg)", textAlign: "center" }}>
             <div style={{ fontWeight: 900 }}>{card?.rank}</div>
             <div style={{ fontSize: 12 }}>{card?.suit}</div>
           </div>
         </div>
 
-        {/* 뒷면 */}
+        {/* 📜 위 레이어: 뒷면 (clip-path 로 모서리 접힘) */}
         <div style={{
           position: "absolute",
+          top: 0, left: 0,
           width: "100%",
           height: "100%",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
           borderRadius: 8,
           background: "linear-gradient(135deg, #4A1033 0%, #2A0520 50%, #1A0512 100%)",
           border: "2px solid #D4A574",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          transform: "rotateY(180deg)",
+          clipPath: backClipPath,
+          WebkitClipPath: backClipPath,
+          transition: "clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1), -webkit-clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
+          boxSizing: "border-box",
         }}>
           <div style={{ 
             border: "1px dashed rgba(212,165,116,0.6)", 
@@ -202,6 +203,23 @@ function Card3D({ card, state, onClick, highlight }) {
             <div style={{ fontSize: 8, letterSpacing: 2, opacity: 0.6 }}>BACCARAT</div>
           </div>
         </div>
+
+        {/* 📜 접힌 모서리 그림자 (삼각형, 접혔다는 걸 강조) */}
+        {["peek1", "peek2", "peek3"].includes(state) && (
+          <div style={{
+            position: "absolute",
+            top: 0, left: 0,
+            width: "100%",
+            height: "100%",
+            borderRadius: 8,
+            background: "linear-gradient(135deg, rgba(0,0,0,0.4), rgba(0,0,0,0.1))",
+            clipPath: foldAccent,
+            WebkitClipPath: foldAccent,
+            transition: "clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1), -webkit-clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
+            pointerEvents: "none",
+          }} />
+        )}
+
       </div>
     </div>
   );
@@ -301,26 +319,26 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     setPhase("squeezing");
   };
 
-  // 👆 개별 카드 클릭 (뒷면 → 쪼기 → 공개)
+  // 👆 개별 카드 클릭 (뒷면 → 쪼기 단계 → 공개)
+  // back → peek1 (살짝) → peek2 (반쯤) → peek3 (많이) → revealed
   const peekCard = (sideKey, idx) => {
     const setter = sideKey === "player" ? setPCards : setBCards;
     setter(prev => {
       const n = [...prev];
-      if (n[idx] === "back") {
-        n[idx] = "peek";
-        playSound("peek");
-      } else if (n[idx] === "peek") {
-        n[idx] = "revealed";
-        playSound("reveal");
-      }
+      const order = ["back", "peek1", "peek2", "peek3", "revealed"];
+      const curIdx = order.indexOf(n[idx]);
+      if (curIdx === -1 || curIdx >= order.length - 1) return prev;
+      n[idx] = order[curIdx + 1];
+      playSound(n[idx] === "revealed" ? "reveal" : "peek");
       return n;
     });
   };
 
-  // 👁 전체 공개
+  // 👁 전체 공개 (back/peek1/peek2/peek3 → revealed)
   const revealAll = () => {
-    setPCards(prev => prev.map(s => s === "empty" ? "empty" : "revealed"));
-    setBCards(prev => prev.map(s => s === "empty" ? "empty" : "revealed"));
+    const unrevealedStates = ["back", "peek1", "peek2", "peek3"];
+    setPCards(prev => prev.map(s => unrevealedStates.includes(s) ? "revealed" : s));
+    setBCards(prev => prev.map(s => unrevealedStates.includes(s) ? "revealed" : s));
     playSound("reveal");
   };
 
@@ -429,9 +447,10 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
   const displayPScore = gameData ? getDisplayScore(gameData.player, pCards) : "-";
   const displayBScore = gameData ? getDisplayScore(gameData.banker, bCards) : "-";
 
+  const unrevealedStates = ["back", "peek1", "peek2", "peek3"];
   const hasUnrevealed = 
-    pCards.some(s => s === "back" || s === "peek") ||
-    bCards.some(s => s === "back" || s === "peek");
+    pCards.some(s => unrevealedStates.includes(s)) ||
+    bCards.some(s => unrevealedStates.includes(s));
 
   return (
     <div style={S.container}>
@@ -504,7 +523,7 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
 
         {phase === "squeezing" && (
           <div style={S.squeezeGuide}>
-            👆 카드 터치 = 쪼기 · 한번 더 = 공개
+            👆 카드 터치할수록 모서리가 더 접힘 · 4번 터치 = 완전 공개
           </div>
         )}
       </div>
