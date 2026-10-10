@@ -152,6 +152,10 @@ export default function RouletteGame({ points = 100000, onPointsChange = ()=>{},
       else if (betStr === "dozen1" && winNum >= 1 && winNum <= 12) { won = true; mult = 3; }
       else if (betStr === "dozen2" && winNum >= 13 && winNum <= 24) { won = true; mult = 3; }
       else if (betStr === "dozen3" && winNum >= 25 && winNum <= 36) { won = true; mult = 3; }
+      // 🎯 컬럼 (세로줄 3개)
+      else if (betStr === "col1" && [1,4,7,10,13,16,19,22,25,28,31,34].includes(winNum)) { won = true; mult = 3; }
+      else if (betStr === "col2" && [2,5,8,11,14,17,20,23,26,29,32,35].includes(winNum)) { won = true; mult = 3; }
+      else if (betStr === "col3" && [3,6,9,12,15,18,21,24,27,30,33,36].includes(winNum)) { won = true; mult = 3; }
       
       if (won) totalPayout += amount * mult;
     }
@@ -289,12 +293,18 @@ export default function RouletteGame({ points = 100000, onPointsChange = ()=>{},
           </div>
         </div>
 
-        {/* 하단 특수 베팅 (Dozen, Color, Odd/Even 등) */}
+        {/* 하단 특수 베팅 (Dozen, Column, Color, Odd/Even 등) */}
         <div style={S.specialBets}>
           <div style={S.dozenRow}>
             <div onClick={()=>placeBet("dozen1")} style={S.specialCell}>1st 12 {renderChipOnBoard("dozen1")}</div>
             <div onClick={()=>placeBet("dozen2")} style={S.specialCell}>2nd 12 {renderChipOnBoard("dozen2")}</div>
             <div onClick={()=>placeBet("dozen3")} style={S.specialCell}>3rd 12 {renderChipOnBoard("dozen3")}</div>
+          </div>
+          {/* 🎯 Column 베팅 (세로줄 3개 - 2 TO 1) */}
+          <div style={S.dozenRow}>
+            <div onClick={()=>placeBet("col3")} style={{...S.specialCell, fontSize:11}}>COL ▲ (2:1) {renderChipOnBoard("col3")}</div>
+            <div onClick={()=>placeBet("col2")} style={{...S.specialCell, fontSize:11}}>COL ■ (2:1) {renderChipOnBoard("col2")}</div>
+            <div onClick={()=>placeBet("col1")} style={{...S.specialCell, fontSize:11}}>COL ▼ (2:1) {renderChipOnBoard("col1")}</div>
           </div>
           <div style={S.outsideRow}>
             <div onClick={()=>placeBet("low")} style={S.specialCell}>1 TO 18 {renderChipOnBoard("low")}</div>
