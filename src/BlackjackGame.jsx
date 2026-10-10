@@ -1,61 +1,139 @@
 // ===================================================================
-// 🎡 Premium 3D Roulette (Evolution Style with Ball Physics & Real Table)
+// 🃏 Premium Blackjack (Evolution Style with 3D Cards & Dealer)
 // ===================================================================
 import React, { useState, useRef, useEffect } from "react";
 
-// --- 글로벌 3D 스핀 & 공 역회전 애니메이션 주입 ---
+// --- 글로벌 애니메이션 주입 ---
 const injectKeyframes = () => {
-  if (document.getElementById("roulette-animations")) return;
+  if (document.getElementById("blackjack-animations")) return;
   const style = document.createElement("style");
-  style.id = "roulette-animations";
+  style.id = "blackjack-animations";
   style.innerHTML = `
-    @keyframes wheelSpin {
-      0% { transform: rotateX(55deg) rotateZ(0deg); }
-      100% { transform: rotateX(55deg) rotateZ(360deg); }
+    @keyframes dealCard {
+      0% { transform: translateY(-300px) scale(0.5) rotate(-20deg); opacity: 0; }
+      100% { transform: translateY(0) scale(1) rotate(0deg); opacity: 1; }
     }
-    @keyframes ballSpin {
-      0% { transform: rotateZ(0deg) translateY(-145px); }
-      20% { transform: rotateZ(-720deg) translateY(-145px); }
-      50% { transform: rotateZ(-1440deg) translateY(-120px); }
-      80% { transform: rotateZ(-2160deg) translateY(-95px); }
-      100% { transform: rotateZ(-2520deg) translateY(-80px); }
+    @keyframes flipCard {
+      0% { transform: rotateY(180deg); }
+      100% { transform: rotateY(0deg); }
     }
-    @keyframes dropChip {
-      0% { transform: scale(1.5) translateY(-20px); opacity: 0; }
-      100% { transform: scale(1) translateY(0); opacity: 1; }
+    @keyframes popResult {
+      0% { transform: scale(0.5); opacity: 0; }
+      70% { transform: scale(1.1); opacity: 1; }
+      100% { transform: scale(1); opacity: 1; }
     }
   `;
   document.head.appendChild(style);
 };
 
-// 유럽식 룰렛 휠 숫자 배열 (0부터 시계방향)
-const WHEEL_NUMBERS = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
-const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+// --- 카드 유틸리티 ---
+const SUITS = ["♠", "♥", "♦", "♣"];
+const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 
-function getColor(n) {
-  if (n === 0) return "green";
-  return RED_NUMBERS.includes(n) ? "red" : "black";
+function createDeck() {
+  const deck = [];
+  for (let i = 0; i < 4; i++) { // 4덱 사용
+    for (const s of SUITS) {
+      for (const r of RANKS) {
+        deck.push({ suit: s, rank: r });
+      }
+    }
+  }
+  return deck.sort(() => Math.random() - 0.5);
 }
 
-export default function RouletteGame({ points = 100000, onPointsChange = ()=>{}, onBack = ()=>{} }) {
+function getCardValue(rank) {
+  if (["J", "Q", "K"].includes(rank)) return 10;
+  if (rank === "A") return 11;
+  return parseInt(rank, 10);
+}
+
+function calculateScore(hand) {
+  let score = 0;
+  let aces = 0;
+  for (const card of hand) {
+    if (!card.hidden) {
+      score += getCardValue(card.rank);
+      if (card.rank === "A") aces += 1;
+    }
+  }
+  while (score > 21 && aces > 0) {
+    score -= 10;
+    aces -= 1;
+  }
+  return score;
+}
+
+// --- 3D 카드 컴포넌트 ---
+function Card3D({ card, index, isDealer }) {
+  const isRed = card.suit === "♥" || card.suit === "♦";
+  
+  // 카드가 겹쳐 보이도록 marginLeft 적용 (첫 카드 제외)
+  const offsetStyle = {
+    marginLeft: index > 0 ? "-35px" : "0px",
+    zIndex: index,
+    animation: "dealCard 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards",
+  };
+
+  return (
+    <div style={{ perspective: "1000px", width: 80, height: 115, ...offsetStyle }}>
+      <div style={{
+        width: "100%", height: "100%", position: "relative",
+        transformStyle: "preserve-3d",
+        transition: "transform 0.6s",
+        transform: card.hidden ? "rotateY(180deg)" : "rotateY(0deg)",
+      }}>
+        {/* 앞면 */}
+        <div style={{
+          ...S.cardFace, background: "linear-gradient(145deg, #fff, #f0f0f0)", color: isRed ? "#E63975" : "#111",
+          transform: "rotateY(0deg)", boxShadow: "2px 4px 10px rgba(0,0,0,0.3)"
+        }}>
+          <div style={{ position: "absolute", top: 4, left: 6, fontSize: 18, lineHeight: 1 }}>
+            <div>{card.rank}</div>
+            <div style={{ fontSize: 14 }}>{card.suit}</div>
+          </div>
+          <div style={{ fontSize: 36, opacity: 0.1, transform: "scale(1.5)" }}>{card.suit}</div>
+          <div style={{ position: "absolute", bottom: 4, right: 6, fontSize: 18, lineHeight: 1, transform: "rotate(180deg)" }}>
+            <div>{card.rank}</div>
+            <div style={{ fontSize: 14 }}>{card.suit}</div>
+          </div>
+        </div>
+
+        {/* 뒷면 (Hidden) */}
+        <div style={{
+          ...S.cardFace, background: "linear-gradient(135deg, #1A0512, #4A1033)",
+          border: "2px solid #D4A574", color: "#D4A574", transform: "rotateY(180deg)",
+          boxShadow: "2px 4px 10px rgba(0,0,0,0.5)"
+        }}>
+          <div style={{ border: "1px dashed rgba(212,165,116,0.5)", width: "86%", height: "90%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>
+            🂠
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- 메인 게임 ---
+export default function BlackjackGame({ points = 100000, onPointsChange = ()=>{}, onBack = ()=>{} }) {
   useEffect(() => { injectKeyframes(); }, []);
 
-  const [bets, setBets] = useState({});
+  const [deck, setDeck] = useState([]);
+  const [gameState, setGameState] = useState("BETTING"); // BETTING, DEALING, PLAYER_TURN, DEALER_TURN, GAME_OVER
+  const [bet, setBet] = useState(0);
   const [chipAmount, setChipAmount] = useState(1000);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [result, setResult] = useState(null);
-  const [history, setHistory] = useState([]);
   
-  const [wheelRotation, setWheelRotation] = useState(0); 
-  const [ballRotation, setBallRotation] = useState(0);   
-
-  const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
-  const canSpin = totalBet > 0 && !isSpinning && points >= totalBet;
+  const [playerHand, setPlayerHand] = useState([]);
+  const [dealerHand, setDealerHand] = useState([]);
+  const [resultMsg, setResultMsg] = useState(null);
+  const [winAmount, setWinAmount] = useState(0);
 
   const audioCtxRef = useRef(null);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   useEffect(() => {
     audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    setDeck(createDeck());
   }, []);
 
   const playSound = (type) => {
@@ -66,302 +144,331 @@ export default function RouletteGame({ points = 100000, onPointsChange = ()=>{},
     osc.connect(gain);
     gain.connect(ctx.destination);
 
-    if (type === "bet") {
-      osc.frequency.setValueAtTime(600, ctx.currentTime);
+    if (type === "chip") {
+      osc.frequency.setValueAtTime(700, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.1);
-      gain.gain.value = 0.4;
+      gain.gain.value = 0.3;
       osc.start(); setTimeout(() => osc.stop(), 100);
+    } else if (type === "card") {
+      osc.frequency.setValueAtTime(200, ctx.currentTime);
+      gain.gain.value = 0.2;
+      osc.type = "triangle";
+      osc.start(); setTimeout(() => osc.stop(), 150);
     } else if (type === "win") {
       osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.value = 0.5;
+      gain.gain.value = 0.4;
       osc.start(); setTimeout(() => osc.stop(), 400);
-    } else if (type === "spin") {
-      let time = ctx.currentTime;
-      for(let i=0; i<30; i++) {
-        const tick = ctx.createOscillator();
-        const tickGain = ctx.createGain();
-        tick.connect(tickGain);
-        tickGain.connect(ctx.destination);
-        tick.frequency.value = 150;
-        tickGain.gain.value = 0.2 * (1 - i/30);
-        tick.start(time);
-        tick.stop(time + 0.05);
-        time += 0.05 + (i * 0.005); 
+    } else if (type === "lose") {
+      osc.frequency.setValueAtTime(200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.5);
+      gain.gain.value = 0.4;
+      osc.type = "sawtooth";
+      osc.start(); setTimeout(() => osc.stop(), 500);
+    }
+  };
+
+  const placeBet = () => {
+    if (points < chipAmount) return;
+    setBet(prev => prev + chipAmount);
+    onPointsChange(points - chipAmount);
+    playSound("chip");
+  };
+
+  const clearBet = () => {
+    onPointsChange(points + bet);
+    setBet(0);
+  };
+
+  const dealCards = async () => {
+    if (bet === 0) return;
+    setGameState("DEALING");
+    setResultMsg(null);
+    setWinAmount(0);
+    
+    let currentDeck = [...deck];
+    if (currentDeck.length < 20) currentDeck = createDeck();
+
+    const pHand = [];
+    const dHand = [];
+
+    // 딜링 연출 (P -> D -> P -> D(Hidden))
+    pHand.push({ ...currentDeck.pop(), hidden: false });
+    setPlayerHand([...pHand]);
+    playSound("card"); await sleep(400);
+
+    dHand.push({ ...currentDeck.pop(), hidden: false });
+    setDealerHand([...dHand]);
+    playSound("card"); await sleep(400);
+
+    pHand.push({ ...currentDeck.pop(), hidden: false });
+    setPlayerHand([...pHand]);
+    playSound("card"); await sleep(400);
+
+    dHand.push({ ...currentDeck.pop(), hidden: true }); // 딜러 히든 카드
+    setDealerHand([...dHand]);
+    setDeck(currentDeck);
+    playSound("card"); await sleep(600);
+
+    const pScore = calculateScore(pHand);
+    const dScore = calculateScore([{...dHand[0]}, {...dHand[1], hidden: false}]); // 미리 확인용
+
+    // 블랙잭 체크
+    if (pScore === 21) {
+      if (dScore === 21) {
+        endGame(pHand, dHand, "PUSH (BOTH BLACKJACK)");
+      } else {
+        endGame(pHand, dHand, "BLACKJACK!");
       }
+    } else {
+      setGameState("PLAYER_TURN");
     }
   };
 
-  const placeBet = (betType) => {
-    if (isSpinning) return;
-    setBets(prev => ({ ...prev, [betType]: (prev[betType] || 0) + chipAmount }));
-    playSound("bet");
+  const hit = async () => {
+    playSound("card");
+    const newCard = deck.pop();
+    const newHand = [...playerHand, { ...newCard, hidden: false }];
+    setPlayerHand(newHand);
+    setDeck([...deck]);
+
+    const score = calculateScore(newHand);
+    if (score > 21) {
+      await sleep(500);
+      endGame(newHand, dealerHand, "BUST");
+    } else if (score === 21) {
+      await sleep(500);
+      dealerTurn(newHand, dealerHand); // 21이면 강제 스탠드
+    }
   };
 
-  const clearBets = () => { if (!isSpinning) setBets({}); };
+  const stand = async () => {
+    dealerTurn(playerHand, dealerHand);
+  };
 
-  const spin = async () => {
-    if (!canSpin) return;
-    setIsSpinning(true);
-    setResult(null);
-    playSound("spin");
+  const doubleDown = async () => {
+    if (points < bet) return; // 포인트 부족
+    onPointsChange(points - bet);
+    setBet(bet * 2);
+    playSound("chip");
+    await sleep(300);
 
-    const winNum = Math.floor(Math.random() * 37); 
-    const winIdx = WHEEL_NUMBERS.indexOf(winNum);
-    const winColor = getColor(winNum);
+    playSound("card");
+    const newCard = deck.pop();
+    const newHand = [...playerHand, { ...newCard, hidden: false }];
+    setPlayerHand(newHand);
+    setDeck([...deck]);
+
+    const score = calculateScore(newHand);
+    await sleep(800);
     
-    const baseWheelSpin = 1800; 
-    const finalWheelDeg = baseWheelSpin + Math.floor(Math.random() * 360);
+    if (score > 21) {
+      endGame(newHand, dealerHand, "BUST");
+    } else {
+      dealerTurn(newHand, dealerHand);
+    }
+  };
+
+  const dealerTurn = async (pHand, dHand) => {
+    setGameState("DEALER_TURN");
+    await sleep(500);
     
-    const slotAngle = (360 / 37) * winIdx;
-    const baseBallSpin = -2520; 
-    const finalBallDeg = baseBallSpin + (finalWheelDeg % 360) - slotAngle;
+    // 딜러 히든 카드 오픈
+    let currentDHand = [...dHand];
+    currentDHand[1].hidden = false;
+    setDealerHand([...currentDHand]);
+    playSound("card");
+    await sleep(800);
 
-    setWheelRotation(finalWheelDeg);
-    setBallRotation(finalBallDeg);
+    let dScore = calculateScore(currentDHand);
+    let currentDeck = [...deck];
 
-    await new Promise(r => setTimeout(r, 5200));
-
-    let totalPayout = 0;
-    for (const [betStr, amount] of Object.entries(bets)) {
-      let won = false; let mult = 0;
-      
-      if (betStr === String(winNum)) { won = true; mult = 36; }
-      else if (betStr === "red" && winColor === "red") { won = true; mult = 2; }
-      else if (betStr === "black" && winColor === "black") { won = true; mult = 2; }
-      else if (betStr === "even" && winNum !== 0 && winNum % 2 === 0) { won = true; mult = 2; }
-      else if (betStr === "odd" && winNum !== 0 && winNum % 2 === 1) { won = true; mult = 2; }
-      else if (betStr === "low" && winNum >= 1 && winNum <= 18) { won = true; mult = 2; }
-      else if (betStr === "high" && winNum >= 19 && winNum <= 36) { won = true; mult = 2; }
-      else if (betStr === "dozen1" && winNum >= 1 && winNum <= 12) { won = true; mult = 3; }
-      else if (betStr === "dozen2" && winNum >= 13 && winNum <= 24) { won = true; mult = 3; }
-      else if (betStr === "dozen3" && winNum >= 25 && winNum <= 36) { won = true; mult = 3; }
-      
-      if (won) totalPayout += amount * mult;
+    // 소프트 17 룰 (17 이상일 때까지 힛)
+    while (dScore < 17) {
+      currentDHand.push({ ...currentDeck.pop(), hidden: false });
+      setDealerHand([...currentDHand]);
+      dScore = calculateScore(currentDHand);
+      setDeck([...currentDeck]);
+      playSound("card");
+      await sleep(800);
     }
 
-    if (totalPayout > 0) playSound("win");
+    const pScore = calculateScore(pHand);
     
-    const netChange = totalPayout - totalBet;
-    onPointsChange(points + netChange);
-
-    setResult({ number: winNum, color: winColor, payout: totalPayout, netChange });
-    setHistory(prev => [{ num: winNum, color: winColor }, ...prev].slice(0, 15));
-    setIsSpinning(false);
+    if (dScore > 21) endGame(pHand, currentDHand, "DEALER BUST! YOU WIN");
+    else if (dScore > pScore) endGame(pHand, currentDHand, "DEALER WINS");
+    else if (dScore < pScore) endGame(pHand, currentDHand, "YOU WIN!");
+    else endGame(pHand, currentDHand, "PUSH");
   };
 
-  const resetRound = () => { setBets({}); setResult(null); };
+  const endGame = (pHand, dHand, msg) => {
+    setGameState("GAME_OVER");
+    
+    // 히든카드 강제 오픈
+    const finalDHand = dHand.map(c => ({...c, hidden: false}));
+    setDealerHand(finalDHand);
+    setResultMsg(msg);
 
-  const renderChipOnBoard = (betType) => {
-    const amount = bets[betType];
-    if (!amount) return null;
-    return (
-      <div style={S.placedChip}>
-        {amount >= 10000 ? `${Math.floor(amount/1000)}k` : amount}
-      </div>
-    );
+    let payout = 0;
+    if (msg.includes("BLACKJACK!")) { payout = bet + (bet * 1.5); playSound("win"); }
+    else if (msg.includes("WIN")) { payout = bet * 2; playSound("win"); }
+    else if (msg.includes("PUSH")) { payout = bet; playSound("chip"); } // 원금 반환
+    else { playSound("lose"); } // 패배 시 사운드
+
+    if (payout > 0) {
+      onPointsChange(points + payout);
+      setWinAmount(payout);
+    }
   };
+
+  const resetRound = () => {
+    setPlayerHand([]);
+    setDealerHand([]);
+    setBet(0);
+    setResultMsg(null);
+    setGameState("BETTING");
+  };
+
+  // UI 렌더링 값
+  const pScore = calculateScore(playerHand);
+  const dScore = calculateScore(dealerHand);
 
   return (
     <div style={S.container}>
       {/* 헤더 */}
       <div style={S.header}>
         <button onClick={onBack} style={S.backBtn}>← LOBBY</button>
-        <h2 style={S.title}>PREMIUM ROULETTE</h2>
+        <h2 style={S.title}>VIP BLACKJACK</h2>
         <div style={S.points}>💎 {points.toLocaleString()}</div>
       </div>
 
-      {/* 히스토리 바 */}
-      {history.length > 0 && (
-        <div style={S.historyBar}>
-          {history.map((h, i) => (
-            <div key={i} style={{...S.historyDot, background: h.color === "red" ? "#E63975" : h.color === "black" ? "#222" : "#10B981", opacity: i === 0 ? 1 : 0.7 - (i*0.04)}}>
-              {h.num}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 3D 휠 영역 */}
-      <div style={S.wheelContainer}>
-        <div style={S.wheelPerspective}>
-          <div style={{
-            ...S.wheelBody,
-            transform: `rotateX(55deg) rotateZ(${wheelRotation}deg)`,
-            transition: isSpinning ? "transform 5s cubic-bezier(0.2, 0.8, 0.1, 1)" : "none",
-          }}>
-            {WHEEL_NUMBERS.map((n, i) => {
-              const angle = (360 / 37) * i;
-              const color = getColor(n);
-              return (
-                <div key={`slot-${n}`} style={{
-                  ...S.wheelSlot,
-                  transform: `rotateZ(${angle}deg)`
-                }}>
-                  <div style={{
-                    ...S.slotColor,
-                    background: color === "red" ? "#E63975" : color === "black" ? "#111" : "#10B981"
-                  }} />
-                  <span style={S.slotNumber}>{n}</span>
-                </div>
-              );
-            })}
-            <div style={S.wheelCenterCone} />
+      {/* 테이블 영역 */}
+      <div style={S.table}>
+        {/* 딜러 영역 */}
+        <div style={S.dealerArea}>
+          <div style={S.dealerAvatar}>
+            <div style={S.dealerIcon}>🤵</div>
+            <div style={S.dealerName}>EVOLUTION DEALER</div>
           </div>
           
-          <div style={{
-            ...S.ballTrack,
-            transform: `rotateX(55deg) rotateZ(${ballRotation}deg)`,
-            transition: isSpinning ? "transform 5s cubic-bezier(0.1, 0.7, 0.3, 1)" : "none",
-          }}>
-            <div style={{
-              ...S.ball,
-              animation: isSpinning ? "ballSpin 5s cubic-bezier(0.1, 0.7, 0.3, 1) forwards" : "none",
-              transform: `translateY(${isSpinning ? -80 : -80}px)`, 
-            }} />
+          <div style={S.cardsWrapper}>
+            {dealerHand.map((card, i) => <Card3D key={`d-${i}`} card={card} index={i} isDealer />)}
+          </div>
+          {dealerHand.length > 0 && gameState !== "DEALING" && (
+            <div style={S.scoreBadge}>
+              {dScore}
+            </div>
+          )}
+        </div>
+
+        {/* 중앙 베팅존 / 로고 */}
+        <div style={S.centerLogo}>
+          {gameState === "BETTING" ? (
+            <div style={{ opacity: 0.3 }}>BLACKJACK PAYS 3 TO 2<br/>DEALER MUST DRAW TO 16, AND STAND ON ALL 17S</div>
+          ) : (
+            <div style={S.betCircle}>
+              <div style={S.betAmount}>{bet >= 1000 ? `${bet/1000}k` : bet}</div>
+            </div>
+          )}
+        </div>
+
+        {/* 결과 오버레이 */}
+        {resultMsg && (
+          <div style={S.resultOverlay}>
+            <div style={{...S.resultText, color: resultMsg.includes("WIN") || resultMsg.includes("BLACKJACK") ? "#FFD700" : resultMsg.includes("PUSH") ? "#aaa" : "#ff4444"}}>
+              {resultMsg}
+            </div>
+            {winAmount > 0 && <div style={{ fontSize: 20, color: "#fff", marginTop: 8 }}>+{winAmount.toLocaleString()} P</div>}
+          </div>
+        )}
+
+        {/* 플레이어 영역 */}
+        <div style={S.playerArea}>
+          {playerHand.length > 0 && (
+            <div style={{...S.scoreBadge, bottom: "110%", top: "auto", background: pScore > 21 ? "#ff4444" : "rgba(0,0,0,0.6)"}}>
+              {pScore}
+            </div>
+          )}
+          <div style={S.cardsWrapper}>
+            {playerHand.map((card, i) => <Card3D key={`p-${i}`} card={card} index={i} />)}
           </div>
         </div>
-        
-        {/* 결과 배너 오버레이 */}
-        {result && (
-          <div style={S.resultBanner}>
-            <div style={{fontSize: 48, fontWeight: 900, color: result.color === "red" ? "#E63975" : result.color === "black" ? "#888" : "#10B981"}}>
-              {result.number}
+      </div>
+
+      {/* 컨트롤 패널 */}
+      <div style={S.controlPanel}>
+        {gameState === "BETTING" && (
+          <>
+            <div style={S.chipRow}>
+              {[1000, 5000, 10000, 50000].map(v => (
+                <div key={v} onClick={() => setChipAmount(v)} 
+                  style={{...S.chipBtn, ...(chipAmount === v ? S.chipActive : {}), opacity: points < v ? 0.3 : 1}}>
+                  {v >= 1000 ? `${v/1000}k` : v}
+                </div>
+              ))}
             </div>
-            <div style={{fontSize: 16, color: result.netChange > 0 ? "#FFD700" : "#aaa"}}>
-              {result.netChange > 0 ? `+${result.netChange.toLocaleString()} WIN!` : "NO WIN"}
+            <div style={S.betActions}>
+              <button onClick={clearBet} disabled={bet === 0} style={{...S.actionBtn, background: "#333", color: "#fff"}}>CLEAR</button>
+              <button onClick={placeBet} disabled={points < chipAmount} style={{...S.actionBtn, background: "#D4A574", color: "#000"}}>BET CHIP</button>
+              <button onClick={dealCards} disabled={bet === 0} style={{...S.actionBtn, background: "linear-gradient(135deg, #E63975, #FF6B9D)", color: "#fff"}}>DEAL</button>
             </div>
+          </>
+        )}
+
+        {gameState === "PLAYER_TURN" && (
+          <div style={S.playActions}>
+            <button onClick={hit} style={{...S.playBtn, background: "#10B981"}}>HIT</button>
+            <button onClick={stand} style={{...S.playBtn, background: "#ef4444"}}>STAND</button>
+            <button onClick={doubleDown} disabled={points < bet || playerHand.length > 2} style={{...S.playBtn, background: "#FFD700", color: "#000", opacity: (points < bet || playerHand.length > 2) ? 0.4 : 1}}>DOUBLE</button>
+          </div>
+        )}
+
+        {gameState === "GAME_OVER" && (
+          <div style={S.playActions}>
+            <button onClick={resetRound} style={{...S.playBtn, width: "100%", background: "#D4A574", color: "#000"}}>NEW ROUND</button>
           </div>
         )}
       </div>
-
-      {/* 리얼 카지노 베팅 테이블 보드 */}
-      <div style={S.tableBoard}>
-        <div style={S.numbersGrid}>
-          {/* Zero (0) */}
-          <div onClick={() => placeBet("0")} style={{...S.gridCell, ...S.zeroCell}}>
-            0 {renderChipOnBoard("0")}
-          </div>
-          
-          {/* 1~36 Grid (3x12) */}
-          <div style={S.grid3x12}>
-            {[3,6,9,12,15,18,21,24,27,30,33,36].map(n => (
-              <div key={n} onClick={() => placeBet(String(n))} style={{...S.gridCell, background: getColor(n)==="red"?"#8B1E3F":"#222"}}>
-                {n} {renderChipOnBoard(String(n))}
-              </div>
-            ))}
-            {[2,5,8,11,14,17,20,23,26,29,32,35].map(n => (
-              <div key={n} onClick={() => placeBet(String(n))} style={{...S.gridCell, background: getColor(n)==="red"?"#8B1E3F":"#222"}}>
-                {n} {renderChipOnBoard(String(n))}
-              </div>
-            ))}
-            {[1,4,7,10,13,16,19,22,25,28,31,34].map(n => (
-              <div key={n} onClick={() => placeBet(String(n))} style={{...S.gridCell, background: getColor(n)==="red"?"#8B1E3F":"#222"}}>
-                {n} {renderChipOnBoard(String(n))}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 하단 특수 베팅 */}
-        <div style={S.specialBets}>
-          <div style={S.dozenRow}>
-            <div onClick={()=>placeBet("dozen1")} style={S.specialCell}>1st 12 {renderChipOnBoard("dozen1")}</div>
-            <div onClick={()=>placeBet("dozen2")} style={S.specialCell}>2nd 12 {renderChipOnBoard("dozen2")}</div>
-            <div onClick={()=>placeBet("dozen3")} style={S.specialCell}>3rd 12 {renderChipOnBoard("dozen3")}</div>
-          </div>
-          <div style={S.outsideRow}>
-            <div onClick={()=>placeBet("low")} style={S.specialCell}>1 TO 18 {renderChipOnBoard("low")}</div>
-            <div onClick={()=>placeBet("even")} style={S.specialCell}>EVEN {renderChipOnBoard("even")}</div>
-            <div onClick={()=>placeBet("red")} style={{...S.specialCell, color:"#E63975"}}>RED {renderChipOnBoard("red")}</div>
-            <div onClick={()=>placeBet("black")} style={{...S.specialCell, color:"#aaa"}}>BLACK {renderChipOnBoard("black")}</div>
-            <div onClick={()=>placeBet("odd")} style={S.specialCell}>ODD {renderChipOnBoard("odd")}</div>
-            <div onClick={()=>placeBet("high")} style={S.specialCell}>19 TO 36 {renderChipOnBoard("high")}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* 하단 컨트롤 UI */}
-      <div style={S.controlPanel}>
-        <div style={S.chipSelector}>
-          {[1000, 5000, 10000, 50000, 100000].map(v => (
-            <div key={v} onClick={() => setChipAmount(v)} 
-              style={{...S.selectChip, ...(chipAmount === v ? S.selectChipActive : {}), opacity: points < v ? 0.3 : 1}}>
-              {v >= 10000 ? `${v/1000}k` : v/1000}
-            </div>
-          ))}
-        </div>
-        
-        <div style={S.actionRow}>
-          <div style={S.betTotalInfo}>
-            <div style={{fontSize: 12, color: "#888"}}>TOTAL BET</div>
-            <div style={{fontSize: 18, color: "#FFD700", fontWeight: 900}}>{totalBet.toLocaleString()}</div>
-          </div>
-          
-          <button onClick={clearBets} disabled={isSpinning || totalBet===0} style={S.clearBtn}>CLEAR</button>
-          
-          {result ? (
-            <button onClick={resetRound} style={S.spinBtn}>REBET</button>
-          ) : (
-            <button onClick={spin} disabled={!canSpin} style={{...S.spinBtn, opacity: canSpin ? 1 : 0.5}}>
-              {isSpinning ? "SPINNING.." : "SPIN!"}
-            </button>
-          )}
-        </div>
-      </div>
-
     </div>
   );
 }
 
 // --- 스타일 객체 ---
 const S = {
-  container: { fontFamily: "'Inter', sans-serif", padding: "16px 8px", color: "#fff", background: "#050505", minHeight: "100vh", boxSizing: "border-box" },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "0 8px" },
-  backBtn: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "6px 12px", borderRadius: 16, cursor: "pointer", fontSize: 11, fontWeight: 700 },
-  title: { margin: 0, fontSize: 18, fontWeight: 900, background: "linear-gradient(135deg, #D4A574, #FFF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", letterSpacing: 1 },
-  points: { background: "linear-gradient(135deg, #FFD700, #D4A574)", color: "#000", padding: "6px 12px", borderRadius: 16, fontWeight: 900, fontSize: 13, boxShadow: "0 0 10px rgba(212,165,116,0.4)" },
+  container: { fontFamily: "'Inter', sans-serif", padding: 16, background: "#0a0a0a", minHeight: "100vh", color: "#fff", display: "flex", flexDirection: "column" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  backBtn: { background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", padding: "8px 16px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 700 },
+  title: { margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: 2, color: "#D4A574" },
+  points: { background: "rgba(0,0,0,0.5)", border: "1px solid #D4A574", color: "#FFD700", padding: "6px 16px", borderRadius: 20, fontWeight: 800, fontSize: 13 },
   
-  historyBar: { display: "flex", gap: 4, padding: "8px 12px", overflowX: "auto", borderBottom: "1px solid #222" },
-  historyDot: { minWidth: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, textShadow: "0 1px 2px rgba(0,0,0,0.8)" },
+  table: { flex: 1, position: "relative", background: "radial-gradient(ellipse at 50% -20%, #1a4f36 0%, #061c12 100%)", borderRadius: "30px 30px 10px 10px", borderTop: "12px solid #2a1610", borderLeft: "4px solid #2a1610", borderRight: "4px solid #2a1610", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "20px 0", boxShadow: "inset 0 20px 50px rgba(0,0,0,0.5)" },
+  
+  dealerArea: { position: "relative", display: "flex", flexDirection: "column", alignItems: "center", minHeight: 140 },
+  dealerAvatar: { display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 10 },
+  dealerIcon: { fontSize: 32, background: "rgba(0,0,0,0.4)", borderRadius: "50%", width: 50, height: 50, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid rgba(255,215,0,0.3)" },
+  dealerName: { fontSize: 10, color: "#D4A574", marginTop: 4, fontWeight: 700, letterSpacing: 1 },
+  
+  centerLogo: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, fontWeight: 800, color: "rgba(255,255,255,0.4)", letterSpacing: 2 },
+  betCircle: { width: 50, height: 50, borderRadius: "50%", border: "2px dashed rgba(255,215,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.2)" },
+  betAmount: { background: "radial-gradient(circle, #FFD700, #B8860B)", color: "#000", width: 36, height: 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, border: "2px solid #000", boxShadow: "0 4px 8px rgba(0,0,0,0.5)" },
 
-  // --- 3D 휠 뷰 ---
-  wheelContainer: { position: "relative", height: 260, display: "flex", justifyContent: "center", alignItems: "center", overflow: "hidden", background: "radial-gradient(circle at center, #1a1a1a 0%, #000 70%)" },
-  wheelPerspective: { perspective: "800px", width: 300, height: 300, position: "relative" },
+  playerArea: { position: "relative", display: "flex", flexDirection: "column", alignItems: "center", minHeight: 140, paddingBottom: 20 },
   
-  wheelBody: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", borderRadius: "50%", border: "16px solid #2a2a2a", background: "#111", boxShadow: "inset 0 0 40px rgba(0,0,0,0.9), 0 20px 50px rgba(0,0,0,0.5)", transformStyle: "preserve-3d" },
-  wheelCenterCone: { position: "absolute", top: "50%", left: "50%", width: 60, height: 60, transform: "translate(-50%, -50%) translateZ(20px)", borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #D4A574, #8B5A2B)", boxShadow: "0 10px 20px rgba(0,0,0,0.6)" },
+  cardsWrapper: { display: "flex", justifyContent: "center", alignItems: "center", position: "relative" },
+  scoreBadge: { position: "absolute", top: "105%", background: "rgba(0,0,0,0.6)", border: "1px solid rgba(255,255,255,0.2)", padding: "4px 12px", borderRadius: 12, fontSize: 14, fontWeight: 900, color: "#fff", zIndex: 10 },
   
-  wheelSlot: { position: "absolute", top: 0, left: "50%", width: 24, height: 150, marginLeft: -12, transformOrigin: "bottom center", display: "flex", flexDirection: "column", alignItems: "center" },
-  slotColor: { width: "100%", height: 35, borderBottomLeftRadius: 4, borderBottomRightRadius: 4, border: "1px solid #333", borderTop: "none" },
-  slotNumber: { color: "#fff", fontSize: 10, fontWeight: 900, marginTop: 4, transform: "rotate(90deg)" },
+  resultOverlay: { position: "absolute", top: "45%", left: 0, width: "100%", textAlign: "center", zIndex: 50, animation: "popResult 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)" },
+  resultText: { fontSize: 36, fontWeight: 900, textShadow: "0 4px 10px rgba(0,0,0,0.8), 0 0 20px rgba(0,0,0,0.5)", letterSpacing: 2 },
   
-  ballTrack: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", borderRadius: "50%", pointerEvents: "none" },
-  ball: { position: "absolute", top: "50%", left: "50%", width: 12, height: 12, marginLeft: -6, marginTop: -6, background: "radial-gradient(circle at 30% 30%, #fff, #ddd)", borderRadius: "50%", boxShadow: "0 4px 8px rgba(0,0,0,0.6), inset -2px -2px 4px rgba(0,0,0,0.3)" },
+  controlPanel: { background: "#111", padding: 16, borderRadius: "20px 20px 0 0", marginTop: 16 },
+  chipRow: { display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 },
+  chipBtn: { width: 46, height: 46, borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #444, #1a1a1a)", border: "3px dashed #666", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 12, cursor: "pointer", transition: "all 0.2s" },
+  chipActive: { border: "3px dashed #D4A574", transform: "scale(1.1)", boxShadow: "0 4px 15px rgba(212,165,116,0.3)" },
   
-  resultBanner: { position: "absolute", bottom: 20, right: 20, background: "rgba(0,0,0,0.8)", border: "2px solid #D4A574", padding: "10px 20px", borderRadius: 12, textAlign: "center", backdropFilter: "blur(4px)", animation: "dropChip 0.4s ease-out" },
-
-  // --- 리얼 테이블 보드 ---
-  tableBoard: { padding: 12, background: "#0a3a22", borderRadius: 16, border: "4px solid #5a3825", margin: "16px 8px", boxShadow: "inset 0 0 50px rgba(0,0,0,0.8)" },
-  numbersGrid: { display: "flex", marginBottom: 4 },
-  zeroCell: { width: 50, border: "1px solid rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 20, fontWeight: 900, cursor: "pointer", position: "relative" },
-  grid3x12: { flex: 1, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gridTemplateRows: "repeat(3, 1fr)", gap: 0 },
-  gridCell: { border: "1px solid rgba(255,255,255,0.2)", height: 44, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer", position: "relative", transition: "background 0.2s" },
+  betActions: { display: "flex", gap: 10 },
+  actionBtn: { flex: 1, padding: 14, border: "none", borderRadius: 12, fontSize: 14, fontWeight: 900, cursor: "pointer", letterSpacing: 1 },
   
-  specialBets: { display: "flex", flexDirection: "column", gap: 4, marginLeft: 50 }, 
-  dozenRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0 },
-  outsideRow: { display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 0 },
-  specialCell: { border: "1px solid rgba(255,255,255,0.2)", height: 38, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer", position: "relative" },
+  playActions: { display: "flex", gap: 10 },
+  playBtn: { flex: 1, padding: 16, border: "none", borderRadius: 12, color: "#fff", fontSize: 16, fontWeight: 900, cursor: "pointer", letterSpacing: 1, boxShadow: "0 4px 10px rgba(0,0,0,0.3)" },
   
-  placedChip: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 24, height: 24, borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #FFD700, #B8860B)", border: "2px dashed #000", color: "#000", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10, animation: "dropChip 0.2s cubic-bezier(0.1, 0.7, 0.1, 1)" },
-
-  // --- 하단 컨트롤 ---
-  controlPanel: { background: "#111", padding: "16px 12px", borderRadius: "20px 20px 0 0", marginTop: "auto" },
-  chipSelector: { display: "flex", justifyContent: "center", gap: 12, marginBottom: 20 },
-  selectChip: { width: 44, height: 44, borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #444, #1a1a1a)", border: "3px dashed #666", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 12, cursor: "pointer", transition: "all 0.2s" },
-  selectChipActive: { border: "3px dashed #FFD700", transform: "scale(1.15) translateY(-5px)", boxShadow: "0 10px 15px rgba(255,215,0,0.3)" },
-  
-  actionRow: { display: "flex", alignItems: "center", gap: 12 },
-  betTotalInfo: { flex: 1, background: "#222", padding: "10px", borderRadius: 12, textAlign: "center" },
-  clearBtn: { padding: "14px 20px", background: "transparent", border: "1px solid #FF6B9D", color: "#FF6B9D", borderRadius: 12, fontWeight: 800, cursor: "pointer" },
-  spinBtn: { flex: 2, padding: "14px", background: "linear-gradient(135deg, #E63975, #FF6B9D)", border: "none", color: "#fff", borderRadius: 12, fontSize: 18, fontWeight: 900, cursor: "pointer", boxShadow: "0 6px 20px rgba(230,57,117,0.4)" }
+  cardFace: { position: "absolute", width: "100%", height: "100%", backfaceVisibility: "hidden", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }
 };
