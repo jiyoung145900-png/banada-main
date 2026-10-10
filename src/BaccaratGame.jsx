@@ -267,11 +267,7 @@ function Card3D({ card, state, onClick, highlight }) {
             <div style={{ fontSize: 11 }}>{card?.suit}</div>
           </div>
           
-          {/* 왼쪽 아래 랭크/무늬: 아래 왼쪽부터 쪼을 때 점진적으로 드러남 */}
-          <div style={{ position: "absolute", bottom: 4, left: 5, fontSize: 13, lineHeight: 1, transform: "rotate(180deg)", textAlign: "center", fontFamily: "serif" }}>
-            <div style={{ fontWeight: 900 }}>{card?.rank}</div>
-            <div style={{ fontSize: 11 }}>{card?.suit}</div>
-          </div>
+          {/* 왼쪽 아래 모서리에는 숫자/무늬를 두지 않음: 이쪽부터 쪼아도 정보가 먼저 노출되지 않게 함 */}
 
           {/* 중앙 - 랭크별 실제 트럼프 카드 레이아웃 */}
           <CardCenter rank={card?.rank} suit={card?.suit} isRed={isRed} />
