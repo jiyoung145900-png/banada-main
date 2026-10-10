@@ -28,7 +28,7 @@ export default function ReviewDetailModal({
   const hasLiked = review.likedBy?.includes(user?.id);
   const isVideo = review.mediaType === "video";
   const isOwnReview = review.userId === user?.id;
-  const maskedNick = review.displayName || getFakeNickname(review.userId, fakeNicknameOverrides);
+  const maskedNick = review.userNickname || review.userId || "익명";
 
   // ★ 댓글 실시간 로드
   useEffect(() => {
@@ -89,7 +89,6 @@ export default function ReviewDetailModal({
       // 1. 댓글 추가
       await addDoc(collection(db, "reviews", review.id, "comments"), {
         userId: user.id,
-        displayName: pickRandomNickname(), // ★ 작성 시점 랜덤 닉네임
         userNickname: user.nickname || user.name || user.id,
         text: commentText.trim(),
         createdAt: Date.now(),
@@ -145,7 +144,7 @@ export default function ReviewDetailModal({
           {isOwnReview ? (
             <button style={d.deleteBtn} onClick={onDelete}>🗑️</button>
           ) : (
-            <div style={{width: 44, height: 44}}></div>
+            <div style={{width: 30}}></div>
           )}
         </div>
 
@@ -245,7 +244,7 @@ export default function ReviewDetailModal({
             ) : (
               <div style={d.commentsList}>
                 {comments.map(c => {
-                  const cMaskedNick = c.displayName || getFakeNickname(c.userId, fakeNicknameOverrides);
+                  const cMaskedNick = c.displayName || c.userNickname || c.userId || "익명";
                   const isOwnComment = c.userId === user?.id;
                   return (
                     <div key={c.id} style={d.commentItem}>
@@ -336,67 +335,35 @@ const d = {
     overflow: 'hidden',
   },
   header: {
-    // ★ [수정v2] 아이폰 노치/다이나믹아일랜드 영역 공식 개선
-    //   max(20px, calc(env + 12px)) → safe-area가 0이어도 최소 20px 보장
-    //   아이폰 기종별 safe-area 값:
-    //     - iPhone SE: 0 → padding 20px 적용
-    //     - iPhone 14: 47px → padding 59px 적용
-    //     - iPhone 14 Pro (다이나믹아일랜드): 59px → padding 71px 적용
-    //   모든 기종에서 ❮ 버튼이 노치 밑에 충분한 여유를 두고 배치됨
-    padding: '12px 16px',
-    paddingTop: 'max(20px, calc(env(safe-area-inset-top) + 12px))',
-    paddingLeft: 'max(16px, env(safe-area-inset-left))',
-    paddingRight: 'max(16px, env(safe-area-inset-right))',
+    padding: '16px 20px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottom: '1px solid #1a1a1a',
     background: '#0a0a0a',
-    flexShrink: 0,
   },
   closeBtn: {
-    // ★ [수정v2] 44x44 iOS HIG 표준 터치 영역 + flex 중앙 정렬
-    //   30x30 fontSize:22 상태에서 ❮ 글자가 버튼 밖으로 삐져나와 잘려 보이던 문제 해결
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 30, height: 30,
     background: 'transparent',
     color: '#fff',
     border: 'none',
-    fontSize: 30,
-    fontWeight: 400,
-    lineHeight: 1,
+    fontSize: 22,
+    fontWeight: 700,
     cursor: 'pointer',
-    padding: 0,
-    marginLeft: -8, // 왼쪽 끝에 가깝게 → 엄지 접근성
-    WebkitTapHighlightColor: 'transparent',
   },
   headerTitle: {
     color: '#fff',
     fontSize: 15,
     fontWeight: 800,
     letterSpacing: 1,
-    flex: 1,
-    textAlign: 'center',
   },
   deleteBtn: {
-    // ★ [수정v2] closeBtn과 대칭되는 44x44 터치 영역
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 30, height: 30,
     background: 'transparent',
     color: '#ff4444',
     border: 'none',
-    fontSize: 20,
-    lineHeight: 1,
+    fontSize: 16,
     cursor: 'pointer',
-    padding: 0,
-    marginRight: -8,
-    WebkitTapHighlightColor: 'transparent',
   },
   body: {
     flex: 1,
