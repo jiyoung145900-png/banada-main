@@ -11,6 +11,8 @@
 // ===================================================================
 
 import React, { useState, useRef, useEffect } from "react";
+import BaccaratDealer from "./BaccaratDealer";
+import BaccaratRoadmap, { computeStats } from "./BaccaratRoadmap";
 
 // --- 글로벌 애니메이션 주입 ---
 const injectKeyframes = () => {
@@ -52,112 +54,6 @@ function cardScore(card) {
 
 function handScore(hand) {
   return hand.reduce((sum, c) => sum + cardScore(c), 0) % 10;
-}
-
-// ===================================================================
-// 🀄 바카라 로드맵 로직 (중국매)
-// ===================================================================
-// history: ["player", "banker", "tie", ...] (최신이 뒤)
-// 구조: 모든 로드맵은 2D 그리드 (columns[col][row])
-// 최대 6행, 넘치면 drag tail (오른쪽으로 뻗어나감 - 단순화)
-
-const MAX_ROWS = 6;
-
-// 🎯 Big Road: 메인 로드맵 (큰 원, 세로 쌓임)
-// 결과 셀: { result: "P"|"B", ties: number }
-function buildBigRoad(history) {
-  const columns = [];
-  let lastResult = null;
-
-  for (const h of history) {
-    if (h === "tie") {
-      // 가장 최근 셀에 tie 카운트 추가
-      if (columns.length > 0) {
-        const col = columns[columns.length - 1];
-        if (col.length > 0) {
-          col[col.length - 1].ties = (col[col.length - 1].ties || 0) + 1;
-        }
-      }
-      continue;
-    }
-    const r = h === "player" ? "P" : "B";
-    if (r !== lastResult) {
-      columns.push([{ result: r, ties: 0 }]);
-      lastResult = r;
-    } else {
-      const col = columns[columns.length - 1];
-      col.push({ result: r, ties: 0 });
-    }
-  }
-  return columns;
-}
-
-// 🎯 파생 로드맵 공통 로직 (Big Eye / Small / Cockroach)
-// offset: Big Eye = 1, Small = 2, Cockroach = 3
-function buildDerivedRoad(bigRoad, offset) {
-  const colors = []; // "red" or "blue" 순서대로
-
-  for (let col = offset; col < bigRoad.length; col++) {
-    for (let row = 0; row < bigRoad[col].length; row++) {
-      let color;
-      if (row === 0) {
-        // 새 열의 첫 셀 → (col - offset) 와 (col - offset - 1) 길이 비교
-        if (col < offset + 1) continue;
-        const a = bigRoad[col - offset]?.length || 0;
-        const b = bigRoad[col - offset - 1]?.length || 0;
-        color = a === b ? "red" : "blue";
-      } else {
-        // 같은 열의 아래 셀 → (col - offset) 에 같은 행이 있는지
-        const prevLen = bigRoad[col - offset]?.length || 0;
-        color = row < prevLen ? "red" : "blue";
-      }
-      colors.push(color);
-    }
-  }
-  return colors;
-}
-
-// 색상 배열을 2D 그리드로 변환 (연속 같은 색은 세로로)
-function colorsToGrid(colors, maxRows = MAX_ROWS) {
-  const columns = [];
-  let lastColor = null;
-  for (const c of colors) {
-    if (c !== lastColor) {
-      columns.push([c]);
-      lastColor = c;
-    } else {
-      const col = columns[columns.length - 1];
-      col.push(c);
-    }
-  }
-  return columns;
-}
-
-// 🎯 Bead Plate: 단순 격자 (6행 x N열)
-function buildBeadPlate(history, maxRows = MAX_ROWS) {
-  const columns = [];
-  let currentCol = [];
-  for (const h of history) {
-    currentCol.push(h);
-    if (currentCol.length >= maxRows) {
-      columns.push(currentCol);
-      currentCol = [];
-    }
-  }
-  if (currentCol.length > 0) columns.push(currentCol);
-  return columns;
-}
-
-// 🎯 통계
-function computeStats(history) {
-  let p = 0, b = 0, t = 0;
-  for (const h of history) {
-    if (h === "player") p++;
-    else if (h === "banker") b++;
-    else if (h === "tie") t++;
-  }
-  const total = p + b + t;
-  return { p, b, t, total };
 }
 
 function playBaccarat() {
@@ -451,14 +347,7 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     playerPair: [], bankerPair: [], perfectPair: [],
   });
   const [history, setHistory] = useState([]);
-  const [showRoadmap, setShowRoadmap] = useState(false);  // 🀄 로드맵 토글
-  
-  // 🀄 로드맵 계산 (history 바뀔 때마다)
-  const bigRoad = React.useMemo(() => buildBigRoad(history), [history]);
-  const beadPlate = React.useMemo(() => buildBeadPlate(history), [history]);
-  const bigEyeGrid = React.useMemo(() => colorsToGrid(buildDerivedRoad(bigRoad, 1)), [bigRoad]);
-  const smallGrid = React.useMemo(() => colorsToGrid(buildDerivedRoad(bigRoad, 2)), [bigRoad]);
-  const cockroachGrid = React.useMemo(() => colorsToGrid(buildDerivedRoad(bigRoad, 3)), [bigRoad]);
+  const [showRoadmap, setShowRoadmap] = useState(false);
   const stats = React.useMemo(() => computeStats(history), [history]);
   
   // phase: "betting" | "dealing" | "squeezing" | "result"
@@ -742,7 +631,7 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
 
   // 💁 딜러 메시지
   const getDealerMessage = () => {
-    if (phase === "betting") return side ? "BET PLACED · READY TO DEAL" : "PLACE YOUR BETS";
+    if (phase === "betting") return totalMainBet > 0 ? "BET PLACED · READY TO DEAL" : "PLACE YOUR BETS";
     if (phase === "dealing") return "DEALING CARDS...";
     if (phase === "squeezing") return hasUnrevealed ? "SQUEEZE YOUR CARDS!" : "ALMOST THERE...";
     if (phase === "result") {
@@ -763,16 +652,7 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
       </div>
 
       {/* 💁 딜러 영역 */}
-      <div style={S.dealerArea}>
-        <div style={S.dealerLeft}>
-          <DealerAvatar phase={phase} />
-          <div>
-            <div style={S.dealerName}>SOPHIA</div>
-            <div style={S.dealerBadge}>LIVE DEALER</div>
-          </div>
-        </div>
-        <div style={S.dealerMessage}>{dealerMessage}</div>
-      </div>
+      <BaccaratDealer phase={phase} message={dealerMessage} />
 
       {/* 📊 통계 바 */}
       {stats.total > 0 && (
@@ -959,178 +839,12 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
       )}
 
       {showRoadmap && history.length > 0 && (
-        <div style={S.roadmapSection}>
-          <RoadmapView 
-            title="BEAD PLATE · 비드플레이트"
-            type="bead"
-            data={beadPlate}
-          />
-          <RoadmapView 
-            title="BIG ROAD · 큰 로드맵"
-            type="big"
-            data={bigRoad}
-          />
-          <RoadmapView 
-            title="중국점 1군 · BIG EYE ROAD"
-            type="derived"
-            data={bigEyeGrid}
-          />
-          <RoadmapView 
-            title="중국점 2군 · SMALL ROAD"
-            type="derived"
-            data={smallGrid}
-          />
-          <RoadmapView 
-            title="중국점 3군 · COCKROACH ROAD"
-            type="derived"
-            data={cockroachGrid}
-          />
-          <div style={S.roadmapLegend}>
-            <span><span style={{color:"#3B82F6"}}>●</span> P (Player)</span>
-            <span><span style={{color:"#E63975"}}>●</span> B (Banker)</span>
-            <span><span style={{color:"#10B981"}}>●</span> T (Tie)</span>
-            <span>|</span>
-            <span><span style={{color:"#E63975"}}>○</span> 패턴 유지</span>
-            <span><span style={{color:"#3B82F6"}}>○</span> 패턴 변화</span>
-          </div>
-        </div>
+        <BaccaratRoadmap history={history} />
       )}
     </div>
   );
 }
 
-// ====================================================================
-// 💁 딜러 아바타 (SVG)
-// ====================================================================
-function DealerAvatar({ phase }) {
-  const isActive = phase === "dealing" || phase === "squeezing";
-  return (
-    <div style={{
-      width: 48, height: 48, borderRadius: "50%",
-      background: "linear-gradient(135deg, #D4A574, #B07D46)",
-      padding: 2,
-      boxShadow: isActive ? "0 0 15px rgba(212,165,116,0.6)" : "none",
-      transition: "box-shadow 0.3s",
-    }}>
-      <svg viewBox="0 0 100 100" style={{width: "100%", height: "100%", borderRadius: "50%", background: "#1F0817"}}>
-        {/* 머리 */}
-        <circle cx="50" cy="40" r="18" fill="#F5D5B9" />
-        {/* 머리카락 */}
-        <path d="M 32 40 Q 32 25 50 22 Q 68 25 68 40 Q 68 30 50 28 Q 32 30 32 40 Z" fill="#2F1810" />
-        <path d="M 32 40 Q 30 48 32 55 L 36 50 Z" fill="#2F1810" />
-        <path d="M 68 40 Q 70 48 68 55 L 64 50 Z" fill="#2F1810" />
-        {/* 눈 */}
-        <circle cx="43" cy="42" r="1.5" fill="#1F0817" />
-        <circle cx="57" cy="42" r="1.5" fill="#1F0817" />
-        {/* 입술 */}
-        <path d="M 44 50 Q 50 54 56 50" stroke="#E63975" strokeWidth="1.5" fill="none" />
-        {/* 몸 */}
-        <path d="M 20 100 Q 20 70 50 68 Q 80 70 80 100 Z" fill="#1F0817" />
-        <path d="M 30 100 Q 30 75 50 75 Q 70 75 70 100 Z" fill="#2A0520" />
-        {/* 보우타이 */}
-        <path d="M 42 68 L 50 72 L 58 68 L 58 76 L 50 72 L 42 76 Z" fill="#E63975" />
-      </svg>
-    </div>
-  );
-}
-
-// ====================================================================
-// 🀄 로드맵 뷰 (타입별 렌더링)
-// ====================================================================
-function RoadmapView({ title, type, data }) {
-  // 세로 스크롤 가능하도록
-  return (
-    <div style={{marginBottom: 12}}>
-      <div style={{fontSize: 10, color: "#D4A574", fontWeight: 700, letterSpacing: 1, marginBottom: 4}}>
-        {title}
-      </div>
-      <div style={{
-        background: "rgba(255,255,255,0.03)",
-        border: "1px solid rgba(212,165,116,0.2)",
-        borderRadius: 6,
-        padding: 6,
-        overflowX: "auto",
-        overflowY: "hidden",
-      }}>
-        <div style={{display: "flex", gap: 1, minHeight: 90}}>
-          {data.length === 0 ? (
-            <div style={{color: "rgba(255,255,255,0.3)", fontSize: 11, padding: "30px 10px", width: "100%", textAlign: "center"}}>
-              {type === "derived" ? "데이터 쌓이는 중..." : "아직 기록 없음"}
-            </div>
-          ) : data.map((col, ci) => (
-            <div key={ci} style={{display: "flex", flexDirection: "column", gap: 1}}>
-              {col.map((cell, ri) => (
-                <RoadCell key={ri} cell={cell} type={type} />
-              ))}
-              {/* 빈 셀로 패딩 (6행 맞추기) */}
-              {Array.from({length: Math.max(0, 6 - col.length)}).map((_, i) => (
-                <div key={`e-${i}`} style={{width: 14, height: 14}} />
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RoadCell({ cell, type }) {
-  // Big Road: cell = { result: "P"|"B", ties: number }
-  // Bead Plate: cell = "player"|"banker"|"tie"
-  // Derived: cell = "red"|"blue"
-  
-  if (type === "bead") {
-    const color = cell === "player" ? "#3B82F6" : cell === "banker" ? "#E63975" : "#10B981";
-    const label = cell === "player" ? "P" : cell === "banker" ? "B" : "T";
-    return (
-      <div style={{
-        width: 14, height: 14, borderRadius: "50%",
-        background: color, color: "#fff",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 8, fontWeight: 900,
-      }}>
-        {label}
-      </div>
-    );
-  }
-
-  if (type === "big") {
-    const isP = cell.result === "P";
-    const color = isP ? "#3B82F6" : "#E63975";
-    return (
-      <div style={{
-        width: 14, height: 14, borderRadius: "50%",
-        border: `2px solid ${color}`,
-        background: "transparent",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 7, fontWeight: 900, color,
-        position: "relative",
-      }}>
-        {cell.ties > 0 && (
-          <div style={{
-            position: "absolute",
-            width: "100%", height: "100%",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#10B981", fontSize: 10, fontWeight: 900,
-          }}>/</div>
-        )}
-      </div>
-    );
-  }
-
-  if (type === "derived") {
-    const color = cell === "red" ? "#E63975" : "#3B82F6";
-    return (
-      <div style={{
-        width: 14, height: 14, borderRadius: "50%",
-        border: `2px solid ${color}`,
-        background: "transparent",
-      }} />
-    );
-  }
-
-  return null;
-}
 
 // --- 스타일 ---
 const S = {
@@ -1142,23 +856,6 @@ const S = {
 
   historyBar: { display: "flex", gap: 4, marginBottom: 16, background: "rgba(255,255,255,0.03)", padding: 8, borderRadius: 12, overflow: "hidden" },
   historyDot: { width: 14, height: 14, borderRadius: "50%", boxShadow: "inset 0 2px 4px rgba(0,0,0,0.5)" },
-
-  // 💁 딜러 영역
-  dealerArea: { 
-    display: "flex", justifyContent: "space-between", alignItems: "center", 
-    background: "linear-gradient(135deg, rgba(230,57,117,0.1), rgba(212,165,116,0.1))",
-    border: "1px solid rgba(212,165,116,0.3)",
-    borderRadius: 14, padding: "10px 14px", marginBottom: 12,
-  },
-  dealerLeft: { display: "flex", gap: 10, alignItems: "center" },
-  dealerName: { fontSize: 13, fontWeight: 900, color: "#D4A574", letterSpacing: 1 },
-  dealerBadge: { fontSize: 9, color: "#E63975", fontWeight: 800, letterSpacing: 2, marginTop: 2 },
-  dealerMessage: { 
-    fontSize: 11, fontWeight: 700, color: "#fff", letterSpacing: 1,
-    textAlign: "right", maxWidth: "55%",
-    background: "rgba(0,0,0,0.3)", padding: "6px 12px", borderRadius: 8,
-    border: "1px solid rgba(255,255,255,0.1)",
-  },
 
   // 📊 통계 바
   statsBar: { 
@@ -1178,7 +875,7 @@ const S = {
     letterSpacing: 1,
   },
 
-  // 🀄 로드맵
+  // 🀄 로드맵 토글 버튼
   roadmapToggleWrap: { marginTop: 12, textAlign: "center" },
   roadmapToggleBtn: { 
     padding: "10px 20px", 
@@ -1186,17 +883,6 @@ const S = {
     border: "1px solid rgba(212,165,116,0.3)",
     color: "#D4A574", borderRadius: 20, 
     cursor: "pointer", fontSize: 11, fontWeight: 800, letterSpacing: 1,
-  },
-  roadmapSection: { 
-    marginTop: 10, padding: 12,
-    background: "rgba(0,0,0,0.4)",
-    border: "1px solid rgba(212,165,116,0.2)",
-    borderRadius: 12,
-  },
-  roadmapLegend: { 
-    display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center",
-    fontSize: 10, color: "rgba(255,255,255,0.6)", 
-    paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 4,
   },
 
   tableArea: { position: "relative", marginBottom: 20 },
