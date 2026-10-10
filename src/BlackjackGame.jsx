@@ -1,57 +1,59 @@
 // ===================================================================
-// 🃏 BlackjackGame - 블랙잭 (사이트 전용)
+// 🎡 Premium 3D Roulette (Evolution Style with Ball Physics & Real Table)
 // ===================================================================
-// Props:
-//   points: 현재 포인트
-//   onPointsChange: 포인트 변경 콜백
-//   onBack: 로비로 돌아가기
-// ===================================================================
+import React, { useState, useRef, useEffect } from "react";
 
-import { useState, useRef, useEffect } from "react";
+// --- 글로벌 3D 스핀 & 공 역회전 애니메이션 주입 ---
+const injectKeyframes = () => {
+  if (document.getElementById("roulette-animations")) return;
+  const style = document.createElement("style");
+  style.id = "roulette-animations";
+  style.innerHTML = `
+    @keyframes wheelSpin {
+      0% { transform: rotateX(55deg) rotateZ(0deg); }
+      100% { transform: rotateX(55deg) rotateZ(360deg); }
+    }
+    @keyframes ballSpin {
+      0% { transform: rotateZ(0deg) translateY(-145px); }
+      20% { transform: rotateZ(-720deg) translateY(-145px); }
+      50% { transform: rotateZ(-1440deg) translateY(-120px); }
+      80% { transform: rotateZ(-2160deg) translateY(-95px); }
+      100% { transform: rotateZ(-2520deg) translateY(-80px); }
+    }
+    @keyframes dropChip {
+      0% { transform: scale(1.5) translateY(-20px); opacity: 0; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+  `;
+  document.head.appendChild(style);
+};
 
-const SUITS = ["♠", "♥", "♦", "♣"];
-const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+// 유럽식 룰렛 휠 숫자 배열 (0부터 시계방향)
+const WHEEL_NUMBERS = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
+const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
 
-function newDeck() {
-  const d = [];
-  for (const s of SUITS) for (const r of RANKS) d.push({ suit: s, rank: r });
-  return d.sort(() => Math.random() - 0.5);
+function getColor(n) {
+  if (n === 0) return "green";
+  return RED_NUMBERS.includes(n) ? "red" : "black";
 }
 
-function cardValue(c) {
-  if (["J", "Q", "K"].includes(c.rank)) return 10;
-  if (c.rank === "A") return 11;
-  return parseInt(c.rank, 10);
-}
+export default function RouletteGame({ points = 100000, onPointsChange = ()=>{}, onBack = ()=>{} }) {
+  useEffect(() => { injectKeyframes(); }, []);
 
-function handValue(hand) {
-  let total = hand.reduce((s, c) => s + cardValue(c), 0);
-  let aces = hand.filter(c => c.rank === "A").length;
-  while (total > 21 && aces > 0) {
-    total -= 10;
-    aces--;
-  }
-  return total;
-}
-
-function isBlackjack(hand) {
-  return hand.length === 2 && handValue(hand) === 21;
-}
-
-export default function BlackjackGame({ points, onPointsChange, onBack }) {
-  const [bet, setBet] = useState(5000);
-  const [gameState, setGameState] = useState("betting"); // betting, playing, dealer, result
-  const [playerHand, setPlayerHand] = useState([]);
-  const [dealerHand, setDealerHand] = useState([]);
-  const [deck, setDeck] = useState([]);
+  const [bets, setBets] = useState({});
+  const [chipAmount, setChipAmount] = useState(1000);
+  const [isSpinning, setIsSpinning] = useState(false);
   const [result, setResult] = useState(null);
-  const [hideDealerFirst, setHideDealerFirst] = useState(true);
-  const [cardAnimation, setCardAnimation] = useState({});
+  const [history, setHistory] = useState([]);
+  
+  const [wheelRotation, setWheelRotation] = useState(0); 
+  const [ballRotation, setBallRotation] = useState(0);   
 
-  const canvasRef = useRef(null);
+  const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
+  const canSpin = totalBet > 0 && !isSpinning && points >= totalBet;
+
   const audioCtxRef = useRef(null);
 
-  // 오디오 초기화
   useEffect(() => {
     audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
   }, []);
@@ -64,334 +66,302 @@ export default function BlackjackGame({ points, onPointsChange, onBack }) {
     osc.connect(gain);
     gain.connect(ctx.destination);
 
-    if (type === "win") {
-      osc.frequency.setValueAtTime(920, ctx.currentTime);
-      gain.gain.value = 0.5;
-      osc.type = "sine";
-      osc.start();
-      setTimeout(() => osc.stop(), 220);
-    } else if (type === "bust") {
-      osc.frequency.setValueAtTime(180, ctx.currentTime);
-      gain.gain.value = 0.6;
-      osc.type = "sawtooth";
-      osc.start();
-      setTimeout(() => osc.stop(), 400);
-    } else if (type === "blackjack") {
-      osc.frequency.setValueAtTime(680, ctx.currentTime);
+    if (type === "bet") {
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.1);
       gain.gain.value = 0.4;
-      osc.type = "sine";
-      osc.start();
-      setTimeout(() => osc.stop(), 120);
-    } else if (type === "bet") {
-      osc.frequency.setValueAtTime(480, ctx.currentTime);
-      gain.gain.value = 0.3;
-      osc.type = "sawtooth";
-      osc.start();
-      setTimeout(() => osc.stop(), 80);
+      osc.start(); setTimeout(() => osc.stop(), 100);
+    } else if (type === "win") {
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.value = 0.5;
+      osc.start(); setTimeout(() => osc.stop(), 400);
+    } else if (type === "spin") {
+      let time = ctx.currentTime;
+      for(let i=0; i<30; i++) {
+        const tick = ctx.createOscillator();
+        const tickGain = ctx.createGain();
+        tick.connect(tickGain);
+        tickGain.connect(ctx.destination);
+        tick.frequency.value = 150;
+        tickGain.gain.value = 0.2 * (1 - i/30);
+        tick.start(time);
+        tick.stop(time + 0.05);
+        time += 0.05 + (i * 0.005); 
+      }
     }
   };
 
-  const getDeck = () => {
-    const d = newDeck();
-    const p = [d.pop(), d.pop()];
-    const dl = [d.pop(), d.pop()];
-    return { deck: d, player: p, dealer: dl };
+  const placeBet = (betType) => {
+    if (isSpinning) return;
+    setBets(prev => ({ ...prev, [betType]: (prev[betType] || 0) + chipAmount }));
+    playSound("bet");
   };
 
-  const startGame = () => {
-    if (!points || points < bet) return;
-    setGameState("betting");
+  const clearBets = () => { if (!isSpinning) setBets({}); };
+
+  const spin = async () => {
+    if (!canSpin) return;
+    setIsSpinning(true);
     setResult(null);
-    setHideDealerFirst(true);
-    setCardAnimation({});
+    playSound("spin");
 
-    const { deck: newDeck, player, dealer } = getDeck();
-    setDeck(newDeck);
-    setPlayerHand(player);
-    setDealerHand(dealer);
+    const winNum = Math.floor(Math.random() * 37); 
+    const winIdx = WHEEL_NUMBERS.indexOf(winNum);
+    const winColor = getColor(winNum);
+    
+    const baseWheelSpin = 1800; 
+    const finalWheelDeg = baseWheelSpin + Math.floor(Math.random() * 360);
+    
+    const slotAngle = (360 / 37) * winIdx;
+    const baseBallSpin = -2520; 
+    const finalBallDeg = baseBallSpin + (finalWheelDeg % 360) - slotAngle;
 
-    // 블랙잭 체크
-    const pBJ = isBlackjack(player);
-    const dBJ = isBlackjack(dealer);
+    setWheelRotation(finalWheelDeg);
+    setBallRotation(finalBallDeg);
 
-    if (pBJ || dBJ) {
-      setHideDealerFirst(false);
-      setTimeout(() => {
-        if (pBJ && dBJ) finishGame("push", player, dealer);
-        else if (pBJ) finishGame("blackjack", player, dealer);
-        else finishGame("lose", player, dealer);
-      }, 900);
-      setGameState("result");
-    } else {
-      setGameState("playing");
-    }
-  };
+    await new Promise(r => setTimeout(r, 5200));
 
-  const hit = () => {
-    if (gameState !== "playing") return;
-
-    const newDeck = [...deck];
-    const newPlayer = [...playerHand, newDeck.pop()];
-    setDeck(newDeck);
-    setPlayerHand(newPlayer);
-
-    const v = handValue(newPlayer);
-
-    if (v > 21) {
-      playSound("bust");
-      setHideDealerFirst(false);
-      setTimeout(() => finishGame("bust", newPlayer, dealerHand), 600);
-      setGameState("result");
-    } else if (v === 21) {
-      stand(newPlayer);
-    }
-  };
-
-  const stand = async (currentHand = playerHand) => {
-    setGameState("dealer");
-    setHideDealerFirst(false);
-
-    let newDeck = [...deck];
-    let dh = [...dealerHand];
-
-    // 딜러 애니메이션
-    await new Promise(r => setTimeout(r, 700));
-
-    while (handValue(dh) < 17) {
-      await new Promise(r => setTimeout(r, 550));
-      dh = [...dh, newDeck.pop()];
-      setDealerHand([...dh]);
+    let totalPayout = 0;
+    for (const [betStr, amount] of Object.entries(bets)) {
+      let won = false; let mult = 0;
+      
+      if (betStr === String(winNum)) { won = true; mult = 36; }
+      else if (betStr === "red" && winColor === "red") { won = true; mult = 2; }
+      else if (betStr === "black" && winColor === "black") { won = true; mult = 2; }
+      else if (betStr === "even" && winNum !== 0 && winNum % 2 === 0) { won = true; mult = 2; }
+      else if (betStr === "odd" && winNum !== 0 && winNum % 2 === 1) { won = true; mult = 2; }
+      else if (betStr === "low" && winNum >= 1 && winNum <= 18) { won = true; mult = 2; }
+      else if (betStr === "high" && winNum >= 19 && winNum <= 36) { won = true; mult = 2; }
+      else if (betStr === "dozen1" && winNum >= 1 && winNum <= 12) { won = true; mult = 3; }
+      else if (betStr === "dozen2" && winNum >= 13 && winNum <= 24) { won = true; mult = 3; }
+      else if (betStr === "dozen3" && winNum >= 25 && winNum <= 36) { won = true; mult = 3; }
+      
+      if (won) totalPayout += amount * mult;
     }
 
-    await new Promise(r => setTimeout(r, 600));
-    finishGame(null, currentHand, dh);
+    if (totalPayout > 0) playSound("win");
+    
+    const netChange = totalPayout - totalBet;
+    onPointsChange(points + netChange);
+
+    setResult({ number: winNum, color: winColor, payout: totalPayout, netChange });
+    setHistory(prev => [{ num: winNum, color: winColor }, ...prev].slice(0, 15));
+    setIsSpinning(false);
   };
 
-  const finishGame = (outcome, pHand, dHand) => {
-    let payout = 0;
-    let msg = "";
+  const resetRound = () => { setBets({}); setResult(null); };
 
-    if (outcome === "blackjack") {
-      payout = Math.floor(bet * 2.5);
-      msg = "🎉 블랙잭! 1.5배 보너스!";
-    } else if (outcome === "win") {
-      payout = bet * 2;
-      msg = "🎉 승리!";
-    } else if (outcome === "push") {
-      payout = bet;
-      msg = "🤝 무승부";
-    } else if (outcome === "bust") {
-      payout = 0;
-      msg = "💥 버스트! 패배";
-    } else if (outcome === "lose") {
-      payout = 0;
-      msg = "💔 패배";
-    }
-
-    const net = payout - bet;
-    onPointsChange(points + net);
-
-    setResult({ outcome, msg, payout, net, pValue: handValue(pHand), dValue: handValue(dHand) });
+  const renderChipOnBoard = (betType) => {
+    const amount = bets[betType];
+    if (!amount) return null;
+    return (
+      <div style={S.placedChip}>
+        {amount >= 10000 ? `${Math.floor(amount/1000)}k` : amount}
+      </div>
+    );
   };
-
-  const resetGame = () => {
-    setGameState("betting");
-    setPlayerHand([]);
-    setDealerHand([]);
-    setDeck([]);
-    setResult(null);
-    setHideDealerFirst(true);
-  };
-
-  // 카드 뒤집기 애니메이션 Canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !result) return;
-
-    const ctx = canvas.getContext("2d");
-    canvas.width = 220;
-    canvas.height = 130;
-
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const pCards = playerHand || [];
-      const dCards = dealerHand || [];
-
-      pCards.forEach((card, i) => {
-        const flip = cardAnimation.player?.[i]?.back ? 1 : 0;
-        ctx.save();
-        ctx.translate(30 + i * 35, 20);
-        ctx.scale(flip, 1);
-        ctx.drawImage(canvasRef.current, 0, 0, 55, 78);
-        ctx.restore();
-      });
-
-      dCards.forEach((card, i) => {
-        const flip = cardAnimation.dealer?.[i]?.back ? 1 : 0;
-        ctx.save();
-        ctx.translate(30 + i * 35, 70);
-        ctx.scale(flip, 1);
-        ctx.drawImage(canvasRef.current, 0, 0, 55, 78);
-        ctx.restore();
-      });
-
-      requestAnimationFrame(animate);
-    };
-
-    animate();
-  }, [result, playerHand, dealerHand, cardAnimation]);
 
   return (
     <div style={S.container}>
       {/* 헤더 */}
       <div style={S.header}>
-        <button onClick={onBack} style={S.backBtn}>← 로비</button>
-        <h2 style={S.title}>🃏 Blackjack</h2>
+        <button onClick={onBack} style={S.backBtn}>← LOBBY</button>
+        <h2 style={S.title}>PREMIUM ROULETTE</h2>
         <div style={S.points}>💎 {points.toLocaleString()}</div>
       </div>
 
-      {/* 테이블 */}
-      <div style={S.table}>
-        <canvas ref={canvasRef} style={{ display: "block", margin: "0 auto 12px" }} />
+      {/* 히스토리 바 */}
+      {history.length > 0 && (
+        <div style={S.historyBar}>
+          {history.map((h, i) => (
+            <div key={i} style={{...S.historyDot, background: h.color === "red" ? "#E63975" : h.color === "black" ? "#222" : "#10B981", opacity: i === 0 ? 1 : 0.7 - (i*0.04)}}>
+              {h.num}
+            </div>
+          ))}
+        </div>
+      )}
 
-        <div style={S.handArea}>
-          <div style={S.handLabel}>DEALER</div>
-          <div style={S.cards}>
-            {dealerHand.map((c, i) => (
-              <Card
-                key={i}
-                card={c}
-                hidden={hideDealerFirst && i === 1}
-              />
+      {/* 3D 휠 영역 */}
+      <div style={S.wheelContainer}>
+        <div style={S.wheelPerspective}>
+          <div style={{
+            ...S.wheelBody,
+            transform: `rotateX(55deg) rotateZ(${wheelRotation}deg)`,
+            transition: isSpinning ? "transform 5s cubic-bezier(0.2, 0.8, 0.1, 1)" : "none",
+          }}>
+            {WHEEL_NUMBERS.map((n, i) => {
+              const angle = (360 / 37) * i;
+              const color = getColor(n);
+              return (
+                <div key={`slot-${n}`} style={{
+                  ...S.wheelSlot,
+                  transform: `rotateZ(${angle}deg)`
+                }}>
+                  <div style={{
+                    ...S.slotColor,
+                    background: color === "red" ? "#E63975" : color === "black" ? "#111" : "#10B981"
+                  }} />
+                  <span style={S.slotNumber}>{n}</span>
+                </div>
+              );
+            })}
+            <div style={S.wheelCenterCone} />
+          </div>
+          
+          <div style={{
+            ...S.ballTrack,
+            transform: `rotateX(55deg) rotateZ(${ballRotation}deg)`,
+            transition: isSpinning ? "transform 5s cubic-bezier(0.1, 0.7, 0.3, 1)" : "none",
+          }}>
+            <div style={{
+              ...S.ball,
+              animation: isSpinning ? "ballSpin 5s cubic-bezier(0.1, 0.7, 0.3, 1) forwards" : "none",
+              transform: `translateY(${isSpinning ? -80 : -80}px)`, 
+            }} />
+          </div>
+        </div>
+        
+        {/* 결과 배너 오버레이 */}
+        {result && (
+          <div style={S.resultBanner}>
+            <div style={{fontSize: 48, fontWeight: 900, color: result.color === "red" ? "#E63975" : result.color === "black" ? "#888" : "#10B981"}}>
+              {result.number}
+            </div>
+            <div style={{fontSize: 16, color: result.netChange > 0 ? "#FFD700" : "#aaa"}}>
+              {result.netChange > 0 ? `+${result.netChange.toLocaleString()} WIN!` : "NO WIN"}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 리얼 카지노 베팅 테이블 보드 */}
+      <div style={S.tableBoard}>
+        <div style={S.numbersGrid}>
+          {/* Zero (0) */}
+          <div onClick={() => placeBet("0")} style={{...S.gridCell, ...S.zeroCell}}>
+            0 {renderChipOnBoard("0")}
+          </div>
+          
+          {/* 1~36 Grid (3x12) */}
+          <div style={S.grid3x12}>
+            {[3,6,9,12,15,18,21,24,27,30,33,36].map(n => (
+              <div key={n} onClick={() => placeBet(String(n))} style={{...S.gridCell, background: getColor(n)==="red"?"#8B1E3F":"#222"}}>
+                {n} {renderChipOnBoard(String(n))}
+              </div>
+            ))}
+            {[2,5,8,11,14,17,20,23,26,29,32,35].map(n => (
+              <div key={n} onClick={() => placeBet(String(n))} style={{...S.gridCell, background: getColor(n)==="red"?"#8B1E3F":"#222"}}>
+                {n} {renderChipOnBoard(String(n))}
+              </div>
+            ))}
+            {[1,4,7,10,13,16,19,22,25,28,31,34].map(n => (
+              <div key={n} onClick={() => placeBet(String(n))} style={{...S.gridCell, background: getColor(n)==="red"?"#8B1E3F":"#222"}}>
+                {n} {renderChipOnBoard(String(n))}
+              </div>
             ))}
           </div>
         </div>
 
-        <div style={S.divider}></div>
-
-        <div style={S.handArea}>
-          <div style={S.handLabel}>PLAYER</div>
-          <div style={S.cards}>
-            {playerHand.map((c, i) => (
-              <Card key={i} card={c} />
-            ))}
+        {/* 하단 특수 베팅 */}
+        <div style={S.specialBets}>
+          <div style={S.dozenRow}>
+            <div onClick={()=>placeBet("dozen1")} style={S.specialCell}>1st 12 {renderChipOnBoard("dozen1")}</div>
+            <div onClick={()=>placeBet("dozen2")} style={S.specialCell}>2nd 12 {renderChipOnBoard("dozen2")}</div>
+            <div onClick={()=>placeBet("dozen3")} style={S.specialCell}>3rd 12 {renderChipOnBoard("dozen3")}</div>
+          </div>
+          <div style={S.outsideRow}>
+            <div onClick={()=>placeBet("low")} style={S.specialCell}>1 TO 18 {renderChipOnBoard("low")}</div>
+            <div onClick={()=>placeBet("even")} style={S.specialCell}>EVEN {renderChipOnBoard("even")}</div>
+            <div onClick={()=>placeBet("red")} style={{...S.specialCell, color:"#E63975"}}>RED {renderChipOnBoard("red")}</div>
+            <div onClick={()=>placeBet("black")} style={{...S.specialCell, color:"#aaa"}}>BLACK {renderChipOnBoard("black")}</div>
+            <div onClick={()=>placeBet("odd")} style={S.specialCell}>ODD {renderChipOnBoard("odd")}</div>
+            <div onClick={()=>placeBet("high")} style={S.specialCell}>19 TO 36 {renderChipOnBoard("high")}</div>
           </div>
         </div>
       </div>
 
-      {/* 결과 */}
-      {result && (
-        <div
-          style={{
-            ...S.resultMsg,
-            background: result.net > 0
-              ? "linear-gradient(135deg, #10B981, #059669)"
-              : result.net === 0
-              ? "linear-gradient(135deg, #D4A574, #B88E5D)"
-              : "linear-gradient(135deg, #EF4444, #DC2626)",
-          }}
-        >
-          {result.msg}
-          <div style={S.resultSub}>
-            {result.net > 0 ? `+${result.net.toLocaleString()}P` :
-             result.net === 0 ? "±0P" : `${result.net.toLocaleString()}P`}
-          </div>
+      {/* 하단 컨트롤 UI */}
+      <div style={S.controlPanel}>
+        <div style={S.chipSelector}>
+          {[1000, 5000, 10000, 50000, 100000].map(v => (
+            <div key={v} onClick={() => setChipAmount(v)} 
+              style={{...S.selectChip, ...(chipAmount === v ? S.selectChipActive : {}), opacity: points < v ? 0.3 : 1}}>
+              {v >= 10000 ? `${v/1000}k` : v/1000}
+            </div>
+          ))}
         </div>
-      )}
-
-      {/* 베팅 UI */}
-      {gameState === "betting" && (
-        <div style={S.betSection}>
-          <div style={S.betLabel}>베팅 금액</div>
-          <div style={S.betChips}>
-            {[1000, 5000, 10000, 50000, 100000].map((v) => (
-              <button
-                key={v}
-                onClick={() => setBet(v)}
-                disabled={points < v}
-                style={{
-                  ...S.chip,
-                  ...(bet === v ? S.chipActive : {}),
-                  opacity: points < v ? 0.3 : 1,
-                }}
-              >
-                {v >= 10000 ? `${v / 10000}만` : `${v / 1000}천`}
-              </button>
-            ))}
+        
+        <div style={S.actionRow}>
+          <div style={S.betTotalInfo}>
+            <div style={{fontSize: 12, color: "#888"}}>TOTAL BET</div>
+            <div style={{fontSize: 18, color: "#FFD700", fontWeight: 900}}>{totalBet.toLocaleString()}</div>
           </div>
+          
+          <button onClick={clearBets} disabled={isSpinning || totalBet===0} style={S.clearBtn}>CLEAR</button>
+          
+          {result ? (
+            <button onClick={resetRound} style={S.spinBtn}>REBET</button>
+          ) : (
+            <button onClick={spin} disabled={!canSpin} style={{...S.spinBtn, opacity: canSpin ? 1 : 0.5}}>
+              {isSpinning ? "SPINNING.." : "SPIN!"}
+            </button>
+          )}
         </div>
-      )}
-
-      {/* 액션 버튼 */}
-      <div style={S.actions}>
-        {gameState === "betting" && (
-          <button
-            onClick={startGame}
-            disabled={!points || points < bet}
-            style={{ ...S.playBtn, opacity: !points || points < bet ? 0.4 : 1 }}
-          >
-            {bet.toLocaleString()}P 베팅 · DEAL
-          </button>
-        )}
-
-        {gameState === "playing" && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={hit} style={{ ...S.playBtn, flex: 1, background: "linear-gradient(135deg, #10B981, #059669)" }}>
-              HIT
-            </button>
-            <button onClick={stand} style={{ ...S.playBtn, flex: 1, background: "linear-gradient(135deg, #D4A574, #B88E5D)" }}>
-              STAND
-            </button>
-          </div>
-        )}
-
-        {gameState === "result" && (
-          <button onClick={resetGame} style={S.playBtn}>
-            다시 하기
-          </button>
-        )}
       </div>
+
     </div>
   );
 }
 
-function Card({ card, hidden }) {
-  const red = card.suit === "♥" || card.suit === "♦";
-  return (
-    <div
-      style={{
-        ...S.card,
-        background: hidden ? "linear-gradient(135deg, #3d1028, #1f0817)" : "#fff",
-        color: hidden ? "#D4A574" : red ? "#E63975" : "#1F0817",
-        fontSize: hidden ? 32 : 18,
-      }}
-    >
-      {hidden ? "🂠" : `${card.rank}${card.suit}`}
-    </div>
-  );
-}
-
-// 스타일
+// --- 스타일 객체 ---
 const S = {
-  container: { padding: 16, color: "#fff", minHeight: 520 },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  backBtn: { background: "transparent", border: "1px solid rgba(212,165,116,0.5)", color: "#D4A574", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 14 },
-  title: { margin: 0, fontSize: 26, fontWeight: 800, background: "linear-gradient(135deg, #D4A574, #FF6B9D)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
-  points: { background: "linear-gradient(135deg, #3d1028, #1f0817)", padding: "8px 20px", borderRadius: 50, border: "1px solid #D4A574", color: "#D4A574", fontWeight: 700, fontSize: 15 },
-  table: { background: "radial-gradient(ellipse at center, #4e1835 0%, #1f0817 70%)", border: "3px solid rgba(212,165,116,0.4)", borderRadius: 24, padding: 20, marginBottom: 20, position: "relative" },
-  divider: { height: 1, background: "rgba(212,165,116,0.3)", margin: "16px 0" },
-  handArea: { textAlign: "center" },
-  handLabel: { fontSize: 13, fontWeight: 800, letterSpacing: 3, marginBottom: 12, color: "#60A5FA" },
-  cards: { display: "flex", gap: 8, justifyContent: "center", marginBottom: 10 },
-  card: { width: 56, height: 80, background: "#fff", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 16px rgba(0,0,0,0.5)", transition: "transform 0.3s" },
-  resultMsg: { padding: 20, borderRadius: 16, textAlign: "center", fontSize: 21, fontWeight: 800, marginBottom: 20 },
-  resultSub: { fontSize: 13, opacity: 0.9, marginTop: 6 },
-  betSection: { marginBottom: 16 },
-  betLabel: { fontSize: 13, color: "rgba(255,255,255,0.7)", marginBottom: 8, letterSpacing: 1 },
-  betChips: { display: "flex", gap: 8, flexWrap: "wrap" },
-  chip: { flex: 1, minWidth: 50, padding: "12px 14px", background: "rgba(212,165,116,0.12)", border: "1px solid rgba(212,165,116,0.3)", color: "#D4A574", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 13 },
-  chipActive: { background: "linear-gradient(135deg, #D4A574, #FF6B9D)", border: "2px solid #FF6B9D", color: "#fff" },
-  actions: { marginTop: 12 },
-  playBtn: { width: "100%", padding: 18, background: "linear-gradient(135deg, #E63975, #FF6B9D)", border: "none", color: "#fff", borderRadius: 14, fontSize: 17, fontWeight: 800, cursor: "pointer", letterSpacing: 2, boxShadow: "0 6px 20px rgba(230,57,117,0.4)" },
+  container: { fontFamily: "'Inter', sans-serif", padding: "16px 8px", color: "#fff", background: "#050505", minHeight: "100vh", boxSizing: "border-box" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "0 8px" },
+  backBtn: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "6px 12px", borderRadius: 16, cursor: "pointer", fontSize: 11, fontWeight: 700 },
+  title: { margin: 0, fontSize: 18, fontWeight: 900, background: "linear-gradient(135deg, #D4A574, #FFF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", letterSpacing: 1 },
+  points: { background: "linear-gradient(135deg, #FFD700, #D4A574)", color: "#000", padding: "6px 12px", borderRadius: 16, fontWeight: 900, fontSize: 13, boxShadow: "0 0 10px rgba(212,165,116,0.4)" },
+  
+  historyBar: { display: "flex", gap: 4, padding: "8px 12px", overflowX: "auto", borderBottom: "1px solid #222" },
+  historyDot: { minWidth: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, textShadow: "0 1px 2px rgba(0,0,0,0.8)" },
+
+  // --- 3D 휠 뷰 ---
+  wheelContainer: { position: "relative", height: 260, display: "flex", justifyContent: "center", alignItems: "center", overflow: "hidden", background: "radial-gradient(circle at center, #1a1a1a 0%, #000 70%)" },
+  wheelPerspective: { perspective: "800px", width: 300, height: 300, position: "relative" },
+  
+  wheelBody: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", borderRadius: "50%", border: "16px solid #2a2a2a", background: "#111", boxShadow: "inset 0 0 40px rgba(0,0,0,0.9), 0 20px 50px rgba(0,0,0,0.5)", transformStyle: "preserve-3d" },
+  wheelCenterCone: { position: "absolute", top: "50%", left: "50%", width: 60, height: 60, transform: "translate(-50%, -50%) translateZ(20px)", borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #D4A574, #8B5A2B)", boxShadow: "0 10px 20px rgba(0,0,0,0.6)" },
+  
+  wheelSlot: { position: "absolute", top: 0, left: "50%", width: 24, height: 150, marginLeft: -12, transformOrigin: "bottom center", display: "flex", flexDirection: "column", alignItems: "center" },
+  slotColor: { width: "100%", height: 35, borderBottomLeftRadius: 4, borderBottomRightRadius: 4, border: "1px solid #333", borderTop: "none" },
+  slotNumber: { color: "#fff", fontSize: 10, fontWeight: 900, marginTop: 4, transform: "rotate(90deg)" },
+  
+  ballTrack: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", borderRadius: "50%", pointerEvents: "none" },
+  ball: { position: "absolute", top: "50%", left: "50%", width: 12, height: 12, marginLeft: -6, marginTop: -6, background: "radial-gradient(circle at 30% 30%, #fff, #ddd)", borderRadius: "50%", boxShadow: "0 4px 8px rgba(0,0,0,0.6), inset -2px -2px 4px rgba(0,0,0,0.3)" },
+  
+  resultBanner: { position: "absolute", bottom: 20, right: 20, background: "rgba(0,0,0,0.8)", border: "2px solid #D4A574", padding: "10px 20px", borderRadius: 12, textAlign: "center", backdropFilter: "blur(4px)", animation: "dropChip 0.4s ease-out" },
+
+  // --- 리얼 테이블 보드 ---
+  tableBoard: { padding: 12, background: "#0a3a22", borderRadius: 16, border: "4px solid #5a3825", margin: "16px 8px", boxShadow: "inset 0 0 50px rgba(0,0,0,0.8)" },
+  numbersGrid: { display: "flex", marginBottom: 4 },
+  zeroCell: { width: 50, border: "1px solid rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 20, fontWeight: 900, cursor: "pointer", position: "relative" },
+  grid3x12: { flex: 1, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gridTemplateRows: "repeat(3, 1fr)", gap: 0 },
+  gridCell: { border: "1px solid rgba(255,255,255,0.2)", height: 44, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer", position: "relative", transition: "background 0.2s" },
+  
+  specialBets: { display: "flex", flexDirection: "column", gap: 4, marginLeft: 50 }, 
+  dozenRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0 },
+  outsideRow: { display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 0 },
+  specialCell: { border: "1px solid rgba(255,255,255,0.2)", height: 38, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer", position: "relative" },
+  
+  placedChip: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 24, height: 24, borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #FFD700, #B8860B)", border: "2px dashed #000", color: "#000", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10, animation: "dropChip 0.2s cubic-bezier(0.1, 0.7, 0.1, 1)" },
+
+  // --- 하단 컨트롤 ---
+  controlPanel: { background: "#111", padding: "16px 12px", borderRadius: "20px 20px 0 0", marginTop: "auto" },
+  chipSelector: { display: "flex", justifyContent: "center", gap: 12, marginBottom: 20 },
+  selectChip: { width: 44, height: 44, borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #444, #1a1a1a)", border: "3px dashed #666", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 12, cursor: "pointer", transition: "all 0.2s" },
+  selectChipActive: { border: "3px dashed #FFD700", transform: "scale(1.15) translateY(-5px)", boxShadow: "0 10px 15px rgba(255,215,0,0.3)" },
+  
+  actionRow: { display: "flex", alignItems: "center", gap: 12 },
+  betTotalInfo: { flex: 1, background: "#222", padding: "10px", borderRadius: 12, textAlign: "center" },
+  clearBtn: { padding: "14px 20px", background: "transparent", border: "1px solid #FF6B9D", color: "#FF6B9D", borderRadius: 12, fontWeight: 800, cursor: "pointer" },
+  spinBtn: { flex: 2, padding: "14px", background: "linear-gradient(135deg, #E63975, #FF6B9D)", border: "none", color: "#fff", borderRadius: 12, fontSize: 18, fontWeight: 900, cursor: "pointer", boxShadow: "0 6px 20px rgba(230,57,117,0.4)" }
 };
