@@ -338,9 +338,12 @@ function Card3D({ card, state, onClick, highlight }) {
 export default function BaccaratGame({ points = 100000, onPointsChange = () => {}, onBack = () => {} }) {
   useEffect(() => { injectKeyframes(); }, []);
 
-  const [bet, setBet] = useState(5000);
-  const [side, setSide] = useState(null);
-  const [sideBets, setSideBets] = useState({ playerPair: 0, bankerPair: 0, perfectPair: 0 });
+  // 칩을 선택한 뒤 베팅 자리를 누를 때마다 해당 칩 금액이 누적됩니다.
+  const [selectedChip, setSelectedChip] = useState(5000);
+  const [betStacks, setBetStacks] = useState({
+    player: [], tie: [], banker: [],
+    playerPair: [], bankerPair: [], perfectPair: [],
+  });
   const [history, setHistory] = useState([]);
   
   // phase: "betting" | "dealing" | "squeezing" | "result"
@@ -354,8 +357,21 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
   // 서드 카드 추가 완료 플래그 (한 번만 실행)
   const thirdCardAddedRef = useRef(false);
 
-  const totalBet = bet + sideBets.playerPair + sideBets.bankerPair + sideBets.perfectPair;
-  const canPlay = points >= totalBet && side && phase === "betting";
+  const sumChips = (chips = []) => chips.reduce((sum, value) => sum + value, 0);
+  const mainBets = {
+    player: sumChips(betStacks.player),
+    tie: sumChips(betStacks.tie),
+    banker: sumChips(betStacks.banker),
+  };
+  const sideBets = {
+    playerPair: sumChips(betStacks.playerPair),
+    bankerPair: sumChips(betStacks.bankerPair),
+    perfectPair: sumChips(betStacks.perfectPair),
+  };
+  const totalMainBet = mainBets.player + mainBets.tie + mainBets.banker;
+  const totalSideBet = sideBets.playerPair + sideBets.bankerPair + sideBets.perfectPair;
+  const totalBet = totalMainBet + totalSideBet;
+  const canPlay = points >= totalBet && totalMainBet > 0 && phase === "betting";
   
   const audioCtxRef = useRef(null);
   useEffect(() => {
@@ -398,23 +414,48 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const toggleSideBet = (type) => {
+  // 선택한 칩을 어느 베팅 자리에 놓을지 결정합니다.
+  const placeChip = (target) => {
+    if (phase !== "betting" || !betStacks[target]) return;
+    if (points < totalBet + selectedChip) return;
+
+    setBetStacks(prev => ({
+      ...prev,
+      [target]: [...prev[target], selectedChip],
+    }));
+  };
+
+  const clearBets = () => {
     if (phase !== "betting") return;
+    setBetStacks({ player: [], tie: [], banker: [], playerPair: [], bankerPair: [], perfectPair: [] });
+  };
 
-    setSideBets(prev => {
-      // 이미 선택된 사이드 베팅은 해제
-      if (prev[type] > 0) {
-        return { ...prev, [type]: 0 };
-      }
+  const formatChipLabel = (value) => {
+    if (value >= 1000000) return `${value / 1000000}M`;
+    if (value >= 1000) return `${value / 1000}K`;
+    return String(value);
+  };
 
-      // 본벳(bet)은 유지하고, 새 사이드 베팅을 추가할 수 있는지 확인
-      const currentSideTotal = Object.values(prev).reduce((sum, amount) => sum + amount, 0);
-      const nextTotal = bet + currentSideTotal + bet;
-
-      if (points < nextTotal) return prev;
-
-      return { ...prev, [type]: bet };
-    });
+  const renderPlacedChips = (target) => {
+    const stack = betStacks[target] || [];
+    if (!stack.length) return null;
+    const visible = stack.slice(-3);
+    return (
+      <div style={S.placedChips} aria-label={`${sumChips(stack).toLocaleString()}P placed`}>
+        {stack.length > 3 && <span style={S.extraChipCount}>+{stack.length - 3}</span>}
+        {visible.map((value, index) => (
+          <span key={`${target}-${stack.length - visible.length + index}-${value}`} style={{
+            ...S.placedChip,
+            background: value >= 1000000 ? "linear-gradient(135deg, #FFF0A8, #C49A2C)"
+              : value >= 500000 ? "linear-gradient(135deg, #D8B4FE, #7E22CE)"
+              : value >= 100000 ? "linear-gradient(135deg, #FCA5A5, #B91C1C)"
+              : value >= 50000 ? "linear-gradient(135deg, #93C5FD, #1D4ED8)"
+              : value >= 10000 ? "linear-gradient(135deg, #86EFAC, #15803D)"
+              : "linear-gradient(135deg, #E5E7EB, #6B7280)",
+          }}>{formatChipLabel(value)}</span>
+        ))}
+      </div>
+    );
   };
 
   // 🎲 게임 시작
@@ -509,11 +550,20 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     const game = gameData;
     const winner = game.pScore > game.bScore ? "player" : game.bScore > game.pScore ? "banker" : "tie";
     
-    let payout = 0;
-    if (side === winner) {
-      if (winner === "player") payout = bet * 2;
-      else if (winner === "banker") payout = Math.floor(bet * 1.95);
-      else payout = bet * 9;
+    // 본벳은 PLAYER / TIE / BANKER에 각각 둘 수 있습니다.
+    // 타이가 나오면 PLAYER와 BANKER 베팅은 원금 반환(push) 처리합니다.
+    let mainPayout = 0;
+    if (winner === "player") {
+      mainPayout += mainBets.player * 2;
+    } else if (winner === "banker") {
+      mainPayout += Math.floor(mainBets.banker * 1.95);
+    } else {
+      mainPayout += mainBets.tie * 9;
+      mainPayout += mainBets.player + mainBets.banker;
+    }
+    if ((winner === "player" && mainBets.player > 0) ||
+        (winner === "banker" && mainBets.banker > 0) ||
+        (winner === "tie" && mainBets.tie > 0)) {
       playSound("win");
     }
 
@@ -540,12 +590,13 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
       }
     }
 
-    const totalSideBet = sideBets.playerPair + sideBets.bankerPair + sideBets.perfectPair;
-    const totalPayout = payout + sidePayout;
-    const won = side === winner || sidePayout > 0;
+    const totalPayout = mainPayout + sidePayout;
+    const net = totalPayout - totalBet;
+    const won = net > 0;
 
-    onPointsChange(points - bet - totalSideBet + totalPayout);
-    setResult({ ...game, winner, won, payout: totalPayout, sideResults, mainWon: side === winner, sidePayout });
+    onPointsChange(points - totalBet + totalPayout);
+    setResult({ ...game, winner, won, payout: totalPayout, net, sideResults,
+      mainWon: mainBets[winner] > 0, sidePayout });
     setHistory(prev => [winner, ...prev].slice(0, 12));
     setPhase("result");
   };
@@ -553,10 +604,9 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
   const resetGame = () => {
     setResult(null);
     setGameData(null);
-    setSide(null);
+    setBetStacks({ player: [], tie: [], banker: [], playerPair: [], bankerPair: [], perfectPair: [] });
     setPCards(["empty", "empty"]);
     setBCards(["empty", "empty"]);
-    setSideBets({ playerPair: 0, bankerPair: 0, perfectPair: 0 });
     setPhase("betting");
     thirdCardAddedRef.current = false;
   };
@@ -639,7 +689,7 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
                 ? "linear-gradient(90deg, transparent, rgba(16,185,129,0.95), transparent)"
                 : "linear-gradient(90deg, transparent, rgba(0,0,0,0.9), transparent)",
             }}>
-              {result.won ? `WIN! +${result.payout.toLocaleString()}` : "LOSE"}
+              {result.net > 0 ? `WIN! +${result.net.toLocaleString()}` : result.net === 0 ? "PUSH" : `LOSE -${Math.abs(result.net).toLocaleString()}`}
             </div>
           </div>
         )}
@@ -654,68 +704,88 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
       {/* 하단 UI */}
       {phase === "betting" && (
         <div style={S.bettingUI}>
+          <div style={S.bettingHelp}>① 칩 선택  →  ② 베팅 자리를 누를 때마다 해당 금액 추가  →  ③ START</div>
           <div style={S.chipSelector}>
-            {[5000, 10000, 50000, 100000].map(v => (
-              <button key={v} onClick={() => setBet(v)} disabled={points < v}
-                style={{...S.chipBtn, ...(bet === v ? S.chipActive : {}), opacity: points < v ? 0.3 : 1}}>
-                {v / 1000}K
+            {[5000, 10000, 50000, 100000, 500000, 1000000].map(v => (
+              <button key={v} onClick={() => setSelectedChip(v)} disabled={points - totalBet < v}
+                style={{
+                  ...S.chipBtn,
+                  ...(selectedChip === v ? S.chipActive : {}),
+                  ...(v >= 1000000 ? S.chipMillion : v >= 500000 ? S.chipHalfMillion : {}),
+                  opacity: points - totalBet < v ? 0.3 : 1,
+                }}>
+                {formatChipLabel(v)}
               </button>
             ))}
           </div>
+          <div style={S.selectedChipInfo}>선택한 칩: <strong>{selectedChip.toLocaleString()}P</strong> · 베팅 자리 클릭 시 칩 1개 추가</div>
 
           <div style={S.boardAreas}>
-            <button onClick={() => setSide("player")}
-              style={{...S.betArea, borderColor: side === "player" ? "#3B82F6" : "transparent"}}>
+            <button onClick={() => placeChip("player")}
+              style={{...S.betArea, borderColor: betStacks.player.length ? "#3B82F6" : "rgba(59,130,246,0.25)"}}>
               <span style={{color: "#3B82F6", fontWeight: 900}}>PLAYER</span>
               <span style={S.odds}>1:1</span>
+              {renderPlacedChips("player")}
+              <span style={S.placedAmount}>{mainBets.player.toLocaleString()}P</span>
             </button>
-            <button onClick={() => setSide("tie")}
-              style={{...S.betArea, borderColor: side === "tie" ? "#10B981" : "transparent"}}>
+            <button onClick={() => placeChip("tie")}
+              style={{...S.betArea, borderColor: betStacks.tie.length ? "#10B981" : "rgba(16,185,129,0.25)"}}>
               <span style={{color: "#10B981", fontWeight: 900}}>TIE</span>
               <span style={S.odds}>8:1</span>
+              {renderPlacedChips("tie")}
+              <span style={S.placedAmount}>{mainBets.tie.toLocaleString()}P</span>
             </button>
-            <button onClick={() => setSide("banker")}
-              style={{...S.betArea, borderColor: side === "banker" ? "#E63975" : "transparent"}}>
+            <button onClick={() => placeChip("banker")}
+              style={{...S.betArea, borderColor: betStacks.banker.length ? "#E63975" : "rgba(230,57,117,0.25)"}}>
               <span style={{color: "#E63975", fontWeight: 900}}>BANKER</span>
               <span style={S.odds}>1:0.95</span>
+              {renderPlacedChips("banker")}
+              <span style={S.placedAmount}>{mainBets.banker.toLocaleString()}P</span>
             </button>
           </div>
 
-          {/* 🎯 사이드 베팅 */}
+          {/* 사이드 베팅도 선택한 칩을 클릭할 때마다 누적됩니다. */}
           <div style={S.sideBetSection}>
-            <div style={S.sideBetTitle}>SIDE BETS (베팅 선택 → 금액만큼 추가)</div>
+            <div style={S.sideBetTitle}>SIDE BETS · 선택한 칩을 누를 때마다 금액이 추가됩니다</div>
             <div style={S.sideBetRow}>
-              <button onClick={() => toggleSideBet("playerPair")} disabled={sideBets.playerPair === 0 && points < totalBet + bet}
-                style={{...S.sideBetBtn, borderColor: sideBets.playerPair > 0 ? "#3B82F6" : "rgba(59,130,246,0.3)",
-                  background: sideBets.playerPair > 0 ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.02)"}}>
+              <button onClick={() => placeChip("playerPair")}
+                style={{...S.sideBetBtn, borderColor: betStacks.playerPair.length ? "#3B82F6" : "rgba(59,130,246,0.3)",
+                  background: betStacks.playerPair.length ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.02)"}}>
                 <span style={{color: "#3B82F6", fontSize: 10, fontWeight: 800}}>P.PAIR</span>
                 <span style={S.sideBetOdds}>11:1</span>
-                {sideBets.playerPair > 0 && <span style={S.sideBetAmount}>{(sideBets.playerPair/1000)}K</span>}
+                {renderPlacedChips("playerPair")}
+                <span style={S.sideBetAmount}>{sideBets.playerPair.toLocaleString()}P</span>
               </button>
-              <button onClick={() => toggleSideBet("perfectPair")} disabled={sideBets.perfectPair === 0 && points < totalBet + bet}
-                style={{...S.sideBetBtn, borderColor: sideBets.perfectPair > 0 ? "#D4A574" : "rgba(212,165,116,0.3)",
-                  background: sideBets.perfectPair > 0 ? "rgba(212,165,116,0.15)" : "rgba(255,255,255,0.02)"}}>
+              <button onClick={() => placeChip("perfectPair")}
+                style={{...S.sideBetBtn, borderColor: betStacks.perfectPair.length ? "#D4A574" : "rgba(212,165,116,0.3)",
+                  background: betStacks.perfectPair.length ? "rgba(212,165,116,0.15)" : "rgba(255,255,255,0.02)"}}>
                 <span style={{color: "#D4A574", fontSize: 10, fontWeight: 800}}>PERFECT</span>
                 <span style={S.sideBetOdds}>25:1</span>
-                {sideBets.perfectPair > 0 && <span style={S.sideBetAmount}>{(sideBets.perfectPair/1000)}K</span>}
+                {renderPlacedChips("perfectPair")}
+                <span style={S.sideBetAmount}>{sideBets.perfectPair.toLocaleString()}P</span>
               </button>
-              <button onClick={() => toggleSideBet("bankerPair")} disabled={sideBets.bankerPair === 0 && points < totalBet + bet}
-                style={{...S.sideBetBtn, borderColor: sideBets.bankerPair > 0 ? "#E63975" : "rgba(230,57,117,0.3)",
-                  background: sideBets.bankerPair > 0 ? "rgba(230,57,117,0.15)" : "rgba(255,255,255,0.02)"}}>
+              <button onClick={() => placeChip("bankerPair")}
+                style={{...S.sideBetBtn, borderColor: betStacks.bankerPair.length ? "#E63975" : "rgba(230,57,117,0.3)",
+                  background: betStacks.bankerPair.length ? "rgba(230,57,117,0.15)" : "rgba(255,255,255,0.02)"}}>
                 <span style={{color: "#E63975", fontSize: 10, fontWeight: 800}}>B.PAIR</span>
                 <span style={S.sideBetOdds}>11:1</span>
-                {sideBets.bankerPair > 0 && <span style={S.sideBetAmount}>{(sideBets.bankerPair/1000)}K</span>}
+                {renderPlacedChips("bankerPair")}
+                <span style={S.sideBetAmount}>{sideBets.bankerPair.toLocaleString()}P</span>
               </button>
             </div>
-            {totalBet > bet && (
-              <div style={S.totalBetDisplay}>
-                총 베팅: <strong style={{color: "#D4A574"}}>{totalBet.toLocaleString()}P</strong>
-              </div>
-            )}
+          </div>
+
+          <div style={S.betFooter}>
+            <div style={S.totalBetDisplay}>
+              본벳 {totalMainBet.toLocaleString()}P + 사이드 {totalSideBet.toLocaleString()}P
+              <div style={S.totalBetStrong}>총 베팅: {totalBet.toLocaleString()}P / 보유: {points.toLocaleString()}P</div>
+            </div>
+            <button onClick={clearBets} disabled={totalBet === 0}
+              style={{...S.clearBetBtn, opacity: totalBet === 0 ? 0.4 : 1}}>BET RESET</button>
           </div>
 
           <button onClick={handlePlay} disabled={!canPlay} style={{...S.actionBtn, opacity: canPlay ? 1 : 0.5}}>
-            {side ? `PLACE BET (${totalBet.toLocaleString()}P)` : "SELECT POSITION"}
+            {totalMainBet > 0 ? `START (${totalBet.toLocaleString()}P)` : "PLACE A MAIN BET FIRST"}
           </button>
         </div>
       )}
@@ -769,21 +839,32 @@ const S = {
   resultBanner: { width: "100%", textAlign: "center", padding: "16px 0", fontSize: 28, fontWeight: 900, letterSpacing: 3, color: "#fff", textShadow: "0 4px 10px rgba(0,0,0,0.8)", animation: "bannerSlide 0.5s ease-out" },
 
   bettingUI: { background: "rgba(255,255,255,0.02)", borderRadius: 24, padding: 16 },
-  chipSelector: { display: "flex", gap: 10, justifyContent: "center", marginBottom: 20 },
-  chipBtn: { width: 60, height: 60, borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #444, #111)", border: "4px dashed #666", color: "#fff", fontWeight: 900, cursor: "pointer", transition: "all 0.2s", boxShadow: "0 4px 10px rgba(0,0,0,0.5)" },
-  chipActive: { border: "4px dashed #D4A574", transform: "scale(1.1)", boxShadow: "0 0 20px rgba(212,165,116,0.5)" },
+  chipSelector: { display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", marginBottom: 16 },
+  chipBtn: { width: 54, height: 54, borderRadius: "50%", background: "radial-gradient(circle at 30% 30%, #444, #111)", border: "4px dashed #666", color: "#fff", fontWeight: 900, fontSize: 10, cursor: "pointer", transition: "all 0.2s", boxShadow: "0 4px 10px rgba(0,0,0,0.5)" },
+  chipActive: { border: "4px dashed #D4A574", transform: "scale(1.08)", boxShadow: "0 0 20px rgba(212,165,116,0.5)" },
+  chipHalfMillion: { borderColor: "#C084FC", color: "#F3E8FF", background: "radial-gradient(circle at 30% 30%, #7E22CE, #2E1065)", fontSize: 11 },
+  chipMillion: { borderColor: "#FDE68A", color: "#FFF7CC", background: "radial-gradient(circle at 30% 30%, #D4A72C, #713F12)", fontSize: 11 },
+  bettingHelp: { textAlign: "center", color: "rgba(255,255,255,0.68)", fontSize: 11, lineHeight: 1.6, marginBottom: 12 },
+  selectedChipInfo: { textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: -8, marginBottom: 14 },
 
-  boardAreas: { display: "flex", gap: 12, marginBottom: 16 },
-  betArea: { flex: 1, padding: "20px 10px", background: "rgba(255,255,255,0.03)", border: "2px solid", borderRadius: 16, display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", transition: "all 0.2s" },
+  boardAreas: { display: "flex", gap: 8, marginBottom: 16 },
+  betArea: { flex: 1, minWidth: 0, padding: "14px 4px", minHeight: 126, background: "rgba(255,255,255,0.03)", border: "2px solid", borderRadius: 16, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", cursor: "pointer", transition: "all 0.2s", overflow: "hidden" },
   odds: { fontSize: 11, opacity: 0.5, marginTop: 6, fontWeight: 600 },
+  placedChips: { display: "flex", alignItems: "center", justifyContent: "center", gap: 3, minHeight: 26, marginTop: 8, flexWrap: "wrap", maxWidth: "100%" },
+  placedChip: { width: 31, height: 23, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#17120A", fontWeight: 900, fontSize: 8, border: "2px dashed rgba(255,255,255,0.85)", boxShadow: "0 2px 4px rgba(0,0,0,0.5)", flex: "0 0 auto" },
+  extraChipCount: { color: "#fff", fontSize: 9, fontWeight: 800 },
+  placedAmount: { fontSize: 11, color: "#F5E9D2", fontWeight: 800, marginTop: 5, overflowWrap: "anywhere" },
 
-  sideBetSection: { marginBottom: 20 },
-  sideBetTitle: { fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: 1, marginBottom: 8, textAlign: "center" },
-  sideBetRow: { display: "flex", gap: 8 },
-  sideBetBtn: { flex: 1, padding: "10px 6px", border: "2px solid", borderRadius: 10, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, transition: "all 0.2s" },
+  sideBetSection: { marginBottom: 12 },
+  sideBetTitle: { fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: 0.3, marginBottom: 8, textAlign: "center" },
+  sideBetRow: { display: "flex", gap: 6 },
+  sideBetBtn: { flex: 1, minWidth: 0, minHeight: 118, padding: "10px 4px", border: "2px solid", borderRadius: 10, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, transition: "all 0.2s", overflow: "hidden" },
   sideBetOdds: { fontSize: 9, color: "rgba(255,255,255,0.5)", fontWeight: 600 },
-  sideBetAmount: { fontSize: 10, color: "#D4A574", fontWeight: 800, marginTop: 2 },
-  totalBetDisplay: { textAlign: "center", fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 10 },
+  sideBetAmount: { fontSize: 10, color: "#D4A574", fontWeight: 800, marginTop: 2, overflowWrap: "anywhere" },
+  betFooter: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 },
+  totalBetDisplay: { flex: 1, textAlign: "left", fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.7 },
+  totalBetStrong: { color: "#D4A574", fontWeight: 900, fontSize: 12 },
+  clearBetBtn: { padding: "9px 11px", color: "#E5E7EB", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 10, fontSize: 9, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" },
 
   actionBtn: { width: "100%", padding: 20, background: "linear-gradient(135deg, #D4A574, #B07D46)", border: "none", color: "#000", borderRadius: 16, fontSize: 16, fontWeight: 900, letterSpacing: 2, cursor: "pointer", boxShadow: "0 8px 20px rgba(212,165,116,0.3)" },
 
