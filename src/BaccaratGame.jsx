@@ -202,24 +202,24 @@ function Card3D({ card, state, onClick, highlight }) {
     return <div style={{ width: 68, height: 95, margin: "0 4px" }} />;
   }
 
-  // 뒷면의 clip-path (왼쪽 위 모서리가 점점 많이 접히는 효과)
-  // 접힌 자리에 앞면 숫자/무늬 (왼쪽 위에 있음!) 가 드러남
+  // 뒷면의 clip-path: 왼쪽 아래 모서리부터 점점 접히도록 처리
+  // peek1 → peek2 → peek3 순서로 왼쪽 아래에서 앞면이 조금씩 드러남
   const backClipPath = {
-    back:     "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",                      // 전체 뒷면
-    peek1:    "polygon(32% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 22%)",             // 모서리 살짝 (약 15%)
-    peek2:    "polygon(55% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 45%)",             // 반쯤 (약 30%)
-    peek3:    "polygon(85% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 75%)",             // 많이 (약 50%)
-    revealed: "polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%)",              // 전부 사라짐
+    back:     "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",
+    peek1:    "polygon(0% 0%, 100% 0%, 100% 100%, 32% 100%, 0% 78%)",
+    peek2:    "polygon(0% 0%, 100% 0%, 100% 100%, 55% 100%, 0% 55%)",
+    peek3:    "polygon(0% 0%, 100% 0%, 100% 100%, 85% 100%, 0% 25%)",
+    revealed: "polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%)",
   }[state] || "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
 
-  // 접힌 모서리 효과 (삼각형 그림자 - 왼쪽 위에)
+  // 접힌 모서리 그림자: 왼쪽 아래 삼각형
   const foldAccent = {
-    back:     "polygon(0% 0%, 0% 0%, 0% 0%)",
-    peek1:    "polygon(0% 22%, 32% 0%, 0% 0%)",
-    peek2:    "polygon(0% 45%, 55% 0%, 0% 0%)",
-    peek3:    "polygon(0% 75%, 85% 0%, 0% 0%)",
-    revealed: "polygon(0% 0%, 0% 0%, 0% 0%)",
-  }[state] || "polygon(0% 0%, 0% 0%, 0% 0%)";
+    back:     "polygon(0% 100%, 0% 100%, 0% 100%)",
+    peek1:    "polygon(0% 78%, 32% 100%, 0% 100%)",
+    peek2:    "polygon(0% 55%, 55% 100%, 0% 100%)",
+    peek3:    "polygon(0% 25%, 85% 100%, 0% 100%)",
+    revealed: "polygon(0% 100%, 0% 100%, 0% 100%)",
+  }[state] || "polygon(0% 100%, 0% 100%, 0% 100%)";
 
   return (
     <div
@@ -267,6 +267,12 @@ function Card3D({ card, state, onClick, highlight }) {
             <div style={{ fontSize: 11 }}>{card?.suit}</div>
           </div>
           
+          {/* 왼쪽 아래 랭크/무늬: 아래 왼쪽부터 쪼을 때 점진적으로 드러남 */}
+          <div style={{ position: "absolute", bottom: 4, left: 5, fontSize: 13, lineHeight: 1, transform: "rotate(180deg)", textAlign: "center", fontFamily: "serif" }}>
+            <div style={{ fontWeight: 900 }}>{card?.rank}</div>
+            <div style={{ fontSize: 11 }}>{card?.suit}</div>
+          </div>
+
           {/* 중앙 - 랭크별 실제 트럼프 카드 레이아웃 */}
           <CardCenter rank={card?.rank} suit={card?.suit} isRed={isRed} />
           
@@ -398,7 +404,21 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
 
   const toggleSideBet = (type) => {
     if (phase !== "betting") return;
-    setSideBets(prev => ({ ...prev, [type]: prev[type] > 0 ? 0 : bet }));
+
+    setSideBets(prev => {
+      // 이미 선택된 사이드 베팅은 해제
+      if (prev[type] > 0) {
+        return { ...prev, [type]: 0 };
+      }
+
+      // 본벳(bet)은 유지하고, 새 사이드 베팅을 추가할 수 있는지 확인
+      const currentSideTotal = Object.values(prev).reduce((sum, amount) => sum + amount, 0);
+      const nextTotal = bet + currentSideTotal + bet;
+
+      if (points < nextTotal) return prev;
+
+      return { ...prev, [type]: bet };
+    });
   };
 
   // 🎲 게임 시작
@@ -669,21 +689,21 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
           <div style={S.sideBetSection}>
             <div style={S.sideBetTitle}>SIDE BETS (베팅 선택 → 금액만큼 추가)</div>
             <div style={S.sideBetRow}>
-              <button onClick={() => toggleSideBet("playerPair")} disabled={points < totalBet + bet - sideBets.playerPair}
+              <button onClick={() => toggleSideBet("playerPair")} disabled={sideBets.playerPair === 0 && points < totalBet + bet}
                 style={{...S.sideBetBtn, borderColor: sideBets.playerPair > 0 ? "#3B82F6" : "rgba(59,130,246,0.3)",
                   background: sideBets.playerPair > 0 ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.02)"}}>
                 <span style={{color: "#3B82F6", fontSize: 10, fontWeight: 800}}>P.PAIR</span>
                 <span style={S.sideBetOdds}>11:1</span>
                 {sideBets.playerPair > 0 && <span style={S.sideBetAmount}>{(sideBets.playerPair/1000)}K</span>}
               </button>
-              <button onClick={() => toggleSideBet("perfectPair")} disabled={points < totalBet + bet - sideBets.perfectPair}
+              <button onClick={() => toggleSideBet("perfectPair")} disabled={sideBets.perfectPair === 0 && points < totalBet + bet}
                 style={{...S.sideBetBtn, borderColor: sideBets.perfectPair > 0 ? "#D4A574" : "rgba(212,165,116,0.3)",
                   background: sideBets.perfectPair > 0 ? "rgba(212,165,116,0.15)" : "rgba(255,255,255,0.02)"}}>
                 <span style={{color: "#D4A574", fontSize: 10, fontWeight: 800}}>PERFECT</span>
                 <span style={S.sideBetOdds}>25:1</span>
                 {sideBets.perfectPair > 0 && <span style={S.sideBetAmount}>{(sideBets.perfectPair/1000)}K</span>}
               </button>
-              <button onClick={() => toggleSideBet("bankerPair")} disabled={points < totalBet + bet - sideBets.bankerPair}
+              <button onClick={() => toggleSideBet("bankerPair")} disabled={sideBets.bankerPair === 0 && points < totalBet + bet}
                 style={{...S.sideBetBtn, borderColor: sideBets.bankerPair > 0 ? "#E63975" : "rgba(230,57,117,0.3)",
                   background: sideBets.bankerPair > 0 ? "rgba(230,57,117,0.15)" : "rgba(255,255,255,0.02)"}}>
                 <span style={{color: "#E63975", fontSize: 10, fontWeight: 800}}>B.PAIR</span>
