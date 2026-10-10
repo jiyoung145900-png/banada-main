@@ -12,6 +12,7 @@ import {
   getDocs
 } from "firebase/firestore";
 import LandingPage from "./LandingPage";
+import MiniGameModal from "./MiniGameModal";
 import IntroAnimation from "./IntroAnimation";
 import WelcomeAnimation from "./WelcomeAnimation";
 import Dashboard from "./Dashboard";
@@ -397,6 +398,33 @@ export default function App() {
     setCurrentUser(null);
   };
 
+  // 🎰 히든 미니게임 (대시보드 로고 5번 클릭)
+  const [logoClickCount, setLogoClickCount] = useState(0);
+  const [showMiniGame, setShowMiniGame] = useState(false);
+  const logoClickTimerRef = useState({ current: null })[0];
+
+  const handleLogoClick = () => {
+    const newCount = logoClickCount + 1;
+    setLogoClickCount(newCount);
+
+    if (newCount >= 5) {
+      setShowMiniGame(true);
+      setLogoClickCount(0);
+      if (logoClickTimerRef.current) {
+        clearTimeout(logoClickTimerRef.current);
+        logoClickTimerRef.current = null;
+      }
+      return;
+    }
+
+    // 2초 안에 다음 클릭 없으면 리셋
+    if (logoClickTimerRef.current) clearTimeout(logoClickTimerRef.current);
+    logoClickTimerRef.current = setTimeout(() => {
+      setLogoClickCount(0);
+      logoClickTimerRef.current = null;
+    }, 2000);
+  };
+
   const refreshAvatar = (newImg, newIdx) => {
     setAppAvatarImage(newImg); 
     setAppAvatarIdx(newIdx);
@@ -496,20 +524,30 @@ export default function App() {
           />
         </div>
       ) : (
-        <Dashboard
-          user={currentUser}
-          onUpdatePoint={(newVal) => syncUpdate(currentUser.id, newVal, currentUser.refCode, currentUser.referral)}
-          appAvatarImage={appAvatarImage} appAvatarIdx={appAvatarIdx} onAvatarChange={refreshAvatar}
-          t={t} lang={lang} isGuest={isGuest} members={members} regions={REGIONS}
-          slideImages={lang === 'ja' && slideImagesJa?.length ? slideImagesJa : lang === 'en' && slideImagesEn?.length ? slideImagesEn : slideImages}
-          innerLogo={innerLogo}
-          topAdImage={lang === 'ja' && topAdImageJa ? topAdImageJa : lang === 'en' && topAdImageEn ? topAdImageEn : topAdImage}
-          topAdImage2={lang === 'ja' && topAdImage2Ja ? topAdImage2Ja : lang === 'en' && topAdImage2En ? topAdImage2En : topAdImage2}
-          telegramLink={telegramLink}
-          noticeText={noticeText}
-          reviewAccessCode={reviewAccessCode} // ★ [신규] 후기 작성 추천코드
-          onLogout={handleLogout} dashStyles={dashStyles}
-        />
+        <>
+          <Dashboard
+            user={currentUser}
+            onUpdatePoint={(newVal) => syncUpdate(currentUser.id, newVal, currentUser.refCode, currentUser.referral)}
+            appAvatarImage={appAvatarImage} appAvatarIdx={appAvatarIdx} onAvatarChange={refreshAvatar}
+            t={t} lang={lang} isGuest={isGuest} members={members} regions={REGIONS}
+            slideImages={lang === 'ja' && slideImagesJa?.length ? slideImagesJa : lang === 'en' && slideImagesEn?.length ? slideImagesEn : slideImages}
+            innerLogo={innerLogo}
+            topAdImage={lang === 'ja' && topAdImageJa ? topAdImageJa : lang === 'en' && topAdImageEn ? topAdImageEn : topAdImage}
+            topAdImage2={lang === 'ja' && topAdImage2Ja ? topAdImage2Ja : lang === 'en' && topAdImage2En ? topAdImage2En : topAdImage2}
+            telegramLink={telegramLink}
+            noticeText={noticeText}
+            reviewAccessCode={reviewAccessCode} // ★ [신규] 후기 작성 추천코드
+            onLogout={handleLogout} dashStyles={dashStyles}
+            onLogoClick={handleLogoClick}
+          />
+
+          {/* 🎰 히든 미니게임 모달 (로고 5번 클릭 시 열림) */}
+          <MiniGameModal
+            isOpen={showMiniGame}
+            onClose={() => setShowMiniGame(false)}
+            currentUser={currentUser}
+          />
+        </>
       )}
 
       {showLanding && (

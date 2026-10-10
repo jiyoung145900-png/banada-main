@@ -43,7 +43,8 @@ export default function Dashboard({
   topAdImage2, // ★ [신규] LIVE CONNECTED 위, 두 번째 광고 이미지 URL
   telegramLink = "",
   noticeText = "", // ★ [추가] 홈 상단 공지 티커 문구
-  reviewAccessCode = "" // ★ [신규] 후기 작성 가능 추천코드 (Admin 설정)
+  reviewAccessCode = "", // ★ [신규] 후기 작성 가능 추천코드 (Admin 설정)
+  onLogoClick // 🎰 히든 미니게임 트리거 (로고 5번 클릭)
 }) {
   const [activeTab, setActiveTab] = useState('home');
   
@@ -457,6 +458,25 @@ export default function Dashboard({
 
   return (
     <div style={{ ...dashStyles.container, background: '#080808', zIndex: 10, position: 'relative' }}>
+      {/* 🎰 히든 미니게임 트리거 - 홈 탭 최상단 중앙 로고 영역 (5번 연속 클릭 시 열림) */}
+      {activeTab === 'home' && onLogoClick && (
+        <div
+          onClick={onLogoClick}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 160,
+            height: 100,
+            zIndex: 999,
+            cursor: 'pointer',
+            // 투명 - 유저는 안 보임 (디버깅 시 아래 주석 해제)
+            // background: 'rgba(255, 0, 0, 0.15)',
+          }}
+        />
+      )}
+
       <div style={{...dashStyles.contentArea, background: 'transparent'}}>
         {activeTab !== 'home' && activeTab !== 'event' && activeTab !== 'mypage' && (
           <div style={s.topStatus}>
