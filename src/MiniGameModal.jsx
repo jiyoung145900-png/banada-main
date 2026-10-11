@@ -16,6 +16,8 @@ import { db } from "./firebase";
 import BaccaratGame from "./BaccaratGame";
 import RouletteGame from "./RouletteGame";
 import BlackjackGame from "./BlackjackGame";
+import HoldemLobby from "./HoldemLobby";
+import HoldemTable from "./HoldemTable";
 
 const INITIAL_POINTS = 10000;
 const DAILY_BONUS = 1000;
@@ -23,7 +25,9 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function MiniGameModal({ isOpen, onClose, currentUser }) {
   const [points, setPoints] = useState(0);
+  // screen: lobby, baccarat, roulette, blackjack, holdem_lobby, holdem_table
   const [screen, setScreen] = useState("lobby");
+  const [currentTableId, setCurrentTableId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bonusMsg, setBonusMsg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -89,7 +93,18 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
 
   const handleClose = () => {
     setScreen("lobby");
+    setCurrentTableId(null);
     onClose();
+  };
+
+  // 🃏 홀덤 테이블 입장/퇴장
+  const handleEnterTable = (tableId) => {
+    setCurrentTableId(tableId);
+    setScreen("holdem_table");
+  };
+  const handleLeaveTable = () => {
+    setCurrentTableId(null);
+    setScreen("holdem_lobby");
   };
 
   if (!isOpen) return null;
@@ -125,6 +140,26 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
             )}
             {screen === "blackjack" && (
               <BlackjackGame points={points} onPointsChange={handlePointsChange} onBack={() => setScreen("lobby")} />
+            )}
+            {screen === "holdem_lobby" && (
+              <HoldemLobby
+                userId={userId}
+                userName={currentUser?.nickname || currentUser?.id || "GUEST"}
+                gamePoints={points}
+                onPointsChange={handlePointsChange}
+                onEnterTable={handleEnterTable}
+                onBack={() => setScreen("lobby")}
+              />
+            )}
+            {screen === "holdem_table" && currentTableId && (
+              <HoldemTable
+                tableId={currentTableId}
+                userId={userId}
+                userName={currentUser?.nickname || currentUser?.id || "GUEST"}
+                gamePoints={points}
+                onPointsChange={handlePointsChange}
+                onLeave={handleLeaveTable}
+              />
             )}
           </>
         )}
@@ -177,6 +212,15 @@ function Lobby({ points, onSelect, userName }) {
           color="#FF6B9D"
           onClick={() => onSelect("blackjack")}
         />
+        <GameCard
+          icon="♠"
+          title="Hold'em"
+          subtitle="홀덤 멀티플레이"
+          desc="2~6 Players"
+          color="#10B981"
+          onClick={() => onSelect("holdem_lobby")}
+          badge="NEW"
+        />
       </div>
 
       {/* 안내 */}
@@ -185,14 +229,15 @@ function Lobby({ points, onSelect, userName }) {
         <div style={L.noticeText}>
           · 실제 다이아와 무관<br />
           · 일일 로그인 보너스 +{DAILY_BONUS.toLocaleString()}P<br />
-          · 파산 시 자동으로 {INITIAL_POINTS.toLocaleString()}P 지급
+          · 파산 시 자동으로 {INITIAL_POINTS.toLocaleString()}P 지급<br />
+          · 홀덤은 직원끼리 멀티플레이 가능
         </div>
       </div>
     </div>
   );
 }
 
-function GameCard({ icon, title, subtitle, desc, color, onClick }) {
+function GameCard({ icon, title, subtitle, desc, color, onClick, badge }) {
   return (
     <button
       onClick={onClick}
@@ -201,6 +246,7 @@ function GameCard({ icon, title, subtitle, desc, color, onClick }) {
         borderColor: color,
         background: `linear-gradient(135deg, rgba(255,107,157,0.06), rgba(212,165,116,0.04))`,
         transition: "all 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
+        position: "relative",
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = "translateY(-4px) scale(1.03)";
@@ -215,6 +261,11 @@ function GameCard({ icon, title, subtitle, desc, color, onClick }) {
       <div style={{ ...L.gameTitle, color }}>{title}</div>
       <div style={L.gameSubtitle}>{subtitle}</div>
       <div style={L.gameDesc}>{desc}</div>
+      {badge && (
+        <div style={{...L.badge, background: color}}>
+          {badge}
+        </div>
+      )}
     </button>
   );
 }
@@ -327,6 +378,18 @@ const L = {
   gameTitle: { fontSize: 19, fontWeight: 800, fontFamily: "'Playfair Display', serif" },
   gameSubtitle: { fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 600 },
   gameDesc: { fontSize: 11, color: "rgba(255,255,255,0.5)", marginLeft: "auto" },
+  badge: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: 900,
+    padding: "4px 10px",
+    borderRadius: 12,
+    letterSpacing: 1,
+    boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+  },
   notice: {
     padding: 18,
     background: "rgba(212,165,116,0.07)",
