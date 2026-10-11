@@ -347,7 +347,7 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     playerPair: [], bankerPair: [], perfectPair: [],
   });
   const [history, setHistory] = useState([]);
-  const [showRoadmap, setShowRoadmap] = useState(false);
+  const [showRoadmap, setShowRoadmap] = useState(true); // 베팅 전 참고용 - 기본 펼침
   const stats = React.useMemo(() => computeStats(history), [history]);
   
   // phase: "betting" | "dealing" | "squeezing" | "result"
@@ -664,6 +664,25 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
         </div>
       )}
 
+      {/* 🀄 로드맵 (중국매) - 베팅 결정 참고용, 항상 표시 */}
+      <div style={S.roadmapWrap}>
+        <div style={S.roadmapHeader}>
+          <span style={S.roadmapHeaderTitle}>🀄 중국매 · ROADMAP</span>
+          <button onClick={() => setShowRoadmap(v => !v)} style={S.roadmapToggleBtn}>
+            {showRoadmap ? "접기 ▲" : "펼치기 ▼"}
+          </button>
+        </div>
+        {showRoadmap && (
+          history.length > 0 ? (
+            <BaccaratRoadmap history={history} />
+          ) : (
+            <div style={S.roadmapEmpty}>
+              첫 라운드 결과가 나오면 로드맵이 쌓입니다
+            </div>
+          )
+        )}
+      </div>
+
       {/* 게임 테이블 */}
       <div style={S.tableArea}>
         <div style={S.tableFelt}>
@@ -828,19 +847,6 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
       {phase === "result" && (
         <button onClick={resetGame} style={S.actionBtn}>REBET / NEXT ROUND</button>
       )}
-
-      {/* 🀄 로드맵 (중국매) */}
-      {history.length > 0 && (
-        <div style={S.roadmapToggleWrap}>
-          <button onClick={() => setShowRoadmap(v => !v)} style={S.roadmapToggleBtn}>
-            🀄 {showRoadmap ? "로드맵 숨기기" : "로드맵 보기 (중국매)"}
-          </button>
-        </div>
-      )}
-
-      {showRoadmap && history.length > 0 && (
-        <BaccaratRoadmap history={history} />
-      )}
     </div>
   );
 }
@@ -875,14 +881,27 @@ const S = {
     letterSpacing: 1,
   },
 
-  // 🀄 로드맵 토글 버튼
-  roadmapToggleWrap: { marginTop: 12, textAlign: "center" },
+  // 🀄 로드맵 섹션 (베팅 결정 참고용 - 테이블 위에 위치)
+  roadmapWrap: { marginBottom: 14 },
+  roadmapHeader: { 
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    padding: "6px 10px", marginBottom: 4,
+  },
+  roadmapHeaderTitle: {
+    fontSize: 11, fontWeight: 900, color: "#D4A574", letterSpacing: 2,
+  },
   roadmapToggleBtn: { 
-    padding: "10px 20px", 
+    padding: "4px 12px", 
     background: "rgba(212,165,116,0.1)", 
     border: "1px solid rgba(212,165,116,0.3)",
-    color: "#D4A574", borderRadius: 20, 
-    cursor: "pointer", fontSize: 11, fontWeight: 800, letterSpacing: 1,
+    color: "#D4A574", borderRadius: 12, 
+    cursor: "pointer", fontSize: 10, fontWeight: 700, letterSpacing: 1,
+  },
+  roadmapEmpty: {
+    padding: 20, textAlign: "center", color: "rgba(255,255,255,0.4)",
+    fontSize: 11, fontStyle: "italic",
+    background: "rgba(0,0,0,0.3)", borderRadius: 10,
+    border: "1px dashed rgba(212,165,116,0.2)",
   },
 
   tableArea: { position: "relative", marginBottom: 20 },
