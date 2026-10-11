@@ -93,6 +93,8 @@ export default function App() {
   const [telegramLink, setTelegramLink] = useState(() => load("telegramLink", "https://t.me/BANADA_OFFICIAL"));
   const [showPopup, setShowPopup] = useState(true);
   const [hero, setHero] = useState(() => load("hero", { mode: "image", imageSrc: null, title: { ko: "", en: "" }, desc: { ko: "", en: "" } }));
+  // ★ [복구] videoURL state - 어드민에서 올린 배경 동영상 URL
+  const [videoURL, setVideoURL] = useState(() => load("videoURL", ""));
   const [members, setMembers] = useState(() => load("members", []));
   const [slideImages, setSlideImages] = useState(() => load("slideImages", []));
   const [slideImagesJa, setSlideImagesJa] = useState(() => load("slideImages_ja", []));
@@ -218,6 +220,8 @@ export default function App() {
         if (docSnap.exists()) {
           const data = docSnap.data();
           if (data.hero) setHero(data.hero);
+          // ★ [복구] videoURL 읽기 (어드민에서 올린 배경 동영상)
+          if (data.videoURL !== undefined) setVideoURL(data.videoURL);
           if (data.logo !== undefined) setLogo(data.logo);
           if (data.logoSize) setLogoSize(data.logoSize);
           if (data.logoPos) setLogoPos(data.logoPos);
@@ -225,7 +229,6 @@ export default function App() {
           if (data.slideImages) setSlideImages(data.slideImages);
           if (data.slideImages_ja) setSlideImagesJa(data.slideImages_ja);
           if (data.slideImages_en) setSlideImagesEn(data.slideImages_en);
-          // ★ [제거] videos 관련 필드 제거
           if (data.innerLogo !== undefined) setInnerLogo(data.innerLogo);
           if (data.topAdImage !== undefined) setTopAdImage(data.topAdImage);
           if (data.topAdImage2 !== undefined) setTopAdImage2(data.topAdImage2);
@@ -289,8 +292,9 @@ export default function App() {
     save("members", members); save("hero", hero); save("logo", logo);
     save("logoSize", logoSize); save("logoPos", logoPos); save("slideImages", slideImages);
     save("innerLogo", innerLogo);
+    save("videoURL", videoURL);  // ★ [복구]
     save("telegramLink", telegramLink); save("noticeText", noticeText);
-  }, [lang, loggedIn, isGuest, users, currentUser, hero, logo, logoSize, logoPos, members, slideImages, innerLogo, telegramLink, noticeText]);
+  }, [lang, loggedIn, isGuest, users, currentUser, hero, logo, logoSize, logoPos, members, slideImages, innerLogo, videoURL, telegramLink, noticeText]);
 
   // ★ 로그인 액션
   const handleLoginAction = async (id, pw) => {
@@ -511,6 +515,7 @@ export default function App() {
         <div style={{ height: '100%', overflowY: 'auto' }}>
           <LandingPage
             t={t} lang={lang} users={users} setUsers={setUsers} hero={hero}
+            videoURL={videoURL}
             logo={logo} logoSize={logoSize} logoPos={logoPos} styles={styles} isAdmin={false}
             setLang={setLang}
             onLogin={handleLoginAction}
