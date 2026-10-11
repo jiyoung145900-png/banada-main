@@ -1,179 +1,259 @@
 // ===================================================================
-// 💁 BaccaratDealer - 딜러 영역 (아바타 + 메시지 + 애니메이션)
+// 🎰 VIP Premium Baccarat Dealer - Upgraded by Gemini
 // ===================================================================
 
 import React, { useEffect } from "react";
 
-// 애니메이션 주입
-const injectDealerAnimations = () => {
-  if (document.getElementById("baccarat-dealer-animations")) return;
+// 고급 카지노 전용 애니메이션 주입
+const injectPremiumAnimations = () => {
+  if (document.getElementById("premium-dealer-animations")) return;
   const style = document.createElement("style");
-  style.id = "baccarat-dealer-animations";
+  style.id = "premium-dealer-animations";
   style.innerHTML = `
-    @keyframes dealerIdle {
-      0%, 100% { transform: translateY(0) rotate(0deg); }
-      50% { transform: translateY(-2px) rotate(1deg); }
+    @keyframes floatBreathing {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-2px); }
     }
-    @keyframes dealerSpeak {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
+    @keyframes goldPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(212, 165, 116, 0.4); }
+      70% { box-shadow: 0 0 0 8px rgba(212, 165, 116, 0); }
     }
-    @keyframes dealerWave {
-      0%, 100% { transform: rotate(0deg); }
-      25% { transform: rotate(-5deg); }
-      75% { transform: rotate(5deg); }
+    @keyframes redAlertPulse {
+      0%, 100% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.2), inset 0 0 20px rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.5); }
+      50% { box-shadow: 0 0 25px rgba(239, 68, 68, 0.6), inset 0 0 30px rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.9); }
     }
-    @keyframes dealerPulse {
-      0%, 100% { box-shadow: 0 0 10px rgba(212,165,116,0.3); }
-      50% { box-shadow: 0 0 25px rgba(212,165,116,0.9); }
+    @keyframes waveBounce {
+      0%, 100% { transform: scaleY(0.4); }
+      50% { transform: scaleY(1); }
     }
-    @keyframes msgPop {
-      0% { transform: scale(0.8); opacity: 0; }
-      100% { transform: scale(1); opacity: 1; }
+    @keyframes messageFadeIn {
+      0% { opacity: 0; transform: translateX(10px); }
+      100% { opacity: 1; transform: translateX(0); }
     }
-    @keyframes noMoreBetsFlash {
-      0%, 100% { background: linear-gradient(135deg, rgba(239,68,68,0.3), rgba(239,68,68,0.1)); }
-      50% { background: linear-gradient(135deg, rgba(239,68,68,0.6), rgba(239,68,68,0.3)); }
+    @keyframes liveDotBlink {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
     }
   `;
   document.head.appendChild(style);
 };
 
-function DealerAvatar({ phase, speaking }) {
-  const isActive = phase === "dealing" || phase === "squeezing";
-  const isWaving = phase === "betting";
+// -----------------------------------------------------
+// 1. 프리미엄 딜러 아바타 (헤드셋 장착형 프로 딜러)
+// -----------------------------------------------------
+function PremiumAvatar({ phase, speaking }) {
+  const isDealing = phase === "dealing" || phase === "squeezing";
   
-  let animation = "dealerIdle 3s ease-in-out infinite";
-  if (speaking) animation = "dealerSpeak 0.5s ease-in-out infinite";
-  else if (isWaving) animation = "dealerWave 2s ease-in-out infinite";
-
   return (
     <div style={{
-      width: 56, height: 56, borderRadius: "50%",
-      background: "linear-gradient(135deg, #D4A574, #B07D46)",
-      padding: 2,
-      animation: isActive ? "dealerPulse 1.5s ease-in-out infinite" : "none",
-      transition: "box-shadow 0.3s",
+      width: 64, height: 64, borderRadius: "50%",
+      background: "linear-gradient(145deg, #1A1A1A, #0A0A0A)",
+      padding: 3,
+      border: "1px solid rgba(212,165,116,0.6)",
+      animation: isDealing ? "goldPulse 2s infinite" : "none",
+      position: "relative",
+      boxShadow: "0 4px 15px rgba(0,0,0,0.5)"
     }}>
-      <svg viewBox="0 0 100 100" style={{
-        width: "100%", height: "100%", borderRadius: "50%", 
-        background: "linear-gradient(180deg, #2A0520, #1F0817)",
-        animation,
+      <svg viewBox="0 0 120 120" style={{
+        width: "100%", height: "100%", borderRadius: "50%",
+        background: "linear-gradient(180deg, #2c3e50, #000000)",
+        animation: "floatBreathing 4s ease-in-out infinite",
       }}>
-        {/* 어깨 */}
-        <path d="M 10 100 Q 10 72 50 70 Q 90 72 90 100 Z" fill="#1A0410" />
-        <path d="M 20 100 Q 20 78 50 76 Q 80 78 80 100 Z" fill="#2F1030" />
+        {/* 우아한 배경 후광 */}
+        <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="rgba(212,165,116,0.3)" />
+          <stop offset="100%" stopColor="transparent" />
+        </radialGradient>
+        <circle cx="60" cy="60" r="60" fill="url(#glow)" />
+
+        {/* 딜러 정장 (Body) */}
+        <path d="M 20 120 C 20 85, 35 75, 60 75 C 85 75, 100 85, 100 120 Z" fill="#111" stroke="#222" strokeWidth="2"/>
         
-        {/* 목 */}
-        <rect x="43" y="55" width="14" height="18" fill="#F5D5B9" />
+        {/* 화이트 셔츠 깃 */}
+        <path d="M 45 76 L 60 95 L 75 76 Z" fill="#E8E8E8" />
         
-        {/* 머리 */}
-        <ellipse cx="50" cy="42" rx="20" ry="22" fill="#F5D5B9" />
+        {/* 골드 보우타이 */}
+        <path d="M 52 86 L 60 90 L 68 86 L 68 94 L 60 90 L 52 94 Z" fill="#D4A574" />
+        <circle cx="60" cy="90" r="2.5" fill="#B07D46" />
+
+        {/* 목 & 얼굴 */}
+        <rect x="52" y="55" width="16" height="25" fill="#FAD6B1" />
+        <path d="M 38 50 C 38 20, 82 20, 82 50 C 82 72, 70 80, 60 80 C 50 80, 38 72, 38 50 Z" fill="#FAD6B1" />
+
+        {/* 세련된 올백 머리 (Hair) */}
+        <path d="M 36 50 C 36 15, 84 15, 84 50 C 84 55, 82 60, 78 60 C 80 40, 75 22, 60 22 C 45 22, 40 40, 42 60 C 38 60, 36 55, 36 50 Z" fill="#1A1512" />
+
+        {/* 프로페셔널한 눈매 */}
+        <path d="M 48 49 Q 52 46 55 49" stroke="#333" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+        <path d="M 65 49 Q 68 46 72 49" stroke="#333" strokeWidth="1.5" fill="none" strokeLinecap="round" />
         
-        {/* 머리카락 - 긴 머리 */}
-        <path d="M 30 40 Q 30 20 50 18 Q 70 20 70 40 L 70 55 Q 68 48 65 42 Q 60 32 50 30 Q 40 32 35 42 Q 32 48 30 55 Z" fill="#2F1810" />
-        <path d="M 30 40 L 28 65 L 32 60 Z" fill="#2F1810" />
-        <path d="M 70 40 L 72 65 L 68 60 Z" fill="#2F1810" />
-        
-        {/* 눈썹 */}
-        <path d="M 40 36 Q 43 34 46 36" stroke="#1F0817" strokeWidth="1.2" fill="none" />
-        <path d="M 54 36 Q 57 34 60 36" stroke="#1F0817" strokeWidth="1.2" fill="none" />
-        
-        {/* 눈 */}
-        <circle cx="43" cy="42" r="2" fill="#1F0817" />
-        <circle cx="57" cy="42" r="2" fill="#1F0817" />
-        <circle cx="43.5" cy="41.5" r="0.5" fill="#fff" />
-        <circle cx="57.5" cy="41.5" r="0.5" fill="#fff" />
-        
-        {/* 코 */}
-        <path d="M 50 46 L 48 51 L 52 51 Z" fill="#E8C5A5" />
-        
-        {/* 입 - speaking 상태일 땐 벌어짐 */}
-        {speaking ? (
-          <ellipse cx="50" cy="55" rx="3" ry="2" fill="#1F0817" />
-        ) : (
-          <path d="M 44 54 Q 50 58 56 54" stroke="#E63975" strokeWidth="2" fill="none" strokeLinecap="round" />
-        )}
-        
-        {/* 귀 */}
-        <ellipse cx="29" cy="44" rx="2.5" ry="4" fill="#F5D5B9" />
-        <ellipse cx="71" cy="44" rx="2.5" ry="4" fill="#F5D5B9" />
-        
-        {/* 보우타이 */}
-        <path d="M 42 72 L 50 76 L 58 72 L 58 80 L 50 76 L 42 80 Z" fill="#E63975" />
-        <circle cx="50" cy="76" r="1.5" fill="#A82A5A" />
+        {/* 은은한 미소 */}
+        <path d="M 54 66 Q 60 69 66 66" stroke="#C25975" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+
+        {/* 🎧 라이브 카지노 전용 헤드셋 & 마이크 */}
+        <path d="M 82 35 A 25 25 0 0 1 87 50" stroke="#333" strokeWidth="2.5" fill="none" />
+        <rect x="84" y="44" width="7" height="14" rx="3.5" fill="#222" stroke="#D4A574" strokeWidth="1" />
+        {/* 마이크 붐 (입가로 내려오는 선) */}
+        <path d="M 85 55 C 80 70, 70 73, 64 73" stroke="#222" strokeWidth="2" fill="none" />
+        {/* 마이크 팁 */}
+        <circle cx="62" cy="73" r="3" fill="#D4A574" />
+        {speaking && <circle cx="62" cy="73" r="5" fill="rgba(212,165,116,0.5)" />}
       </svg>
     </div>
   );
 }
 
+// -----------------------------------------------------
+// 2. 오디오 이퀄라이저 (말할 때 표시됨)
+// -----------------------------------------------------
+function AudioEqualizer() {
+  return (
+    <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 16, margin: "0 8px" }}>
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} style={{
+          width: 3, height: "100%", background: "#D4A574", borderRadius: 2,
+          animation: `waveBounce 0.8s infinite ease-in-out`,
+          animationDelay: `${i * 0.15}s`,
+          transformOrigin: "bottom"
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// -----------------------------------------------------
+// 3. 메인 컴포넌트 
+// -----------------------------------------------------
 export default function BaccaratDealer({ 
   phase, 
-  message, 
+  message = "Place your bets, please.", 
   dealerName = "SOPHIA",
-  roundNumber,
-  playerCount,
-  speaking = false,
+  roundNumber = "1049-A",
+  playerCount = 142,
+  speaking = true,
   noMoreBets = false,
 }) {
-  useEffect(() => { injectDealerAnimations(); }, []);
+  useEffect(() => { injectPremiumAnimations(); }, []);
   
   return (
     <div style={{
-      ...S.dealerArea,
-      animation: noMoreBets ? "noMoreBetsFlash 0.6s ease-in-out infinite" : "none",
+      ...S.dealerContainer,
+      // No More Bets 상태일 때 고급스러운 네온 레드 경고 효과
+      animation: noMoreBets ? "redAlertPulse 1.5s infinite" : "none",
+      border: noMoreBets ? "1px solid rgba(239, 68, 68, 0.5)" : "1px solid rgba(212, 165, 116, 0.2)",
     }}>
-      <div style={S.dealerLeft}>
-        <DealerAvatar phase={phase} speaking={speaking} />
-        <div>
+      
+      {/* 왼쪽: 아바타 및 딜러 정보 */}
+      <div style={S.leftSection}>
+        <PremiumAvatar phase={phase} speaking={speaking} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={S.dealerBadge}>LIVE DEALER</div>
           <div style={S.dealerName}>
             {dealerName}
-            <span style={S.liveDot}>●</span>
+            <span style={S.liveIndicator}>●</span>
           </div>
-          <div style={S.dealerBadge}>LIVE DEALER</div>
-          {playerCount !== undefined && (
-            <div style={S.playerCount}>👥 {playerCount} playing</div>
+          {playerCount > 0 && (
+            <div style={S.playerCount}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight:4}}>
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              {playerCount.toLocaleString()}
+            </div>
           )}
         </div>
       </div>
 
-      <div style={S.dealerRight}>
-        <div style={{...S.dealerMessage, animation: "msgPop 0.3s ease-out"}} key={message}>
-          {message}
+      {/* 오른쪽: 메시지 및 라운드 정보 */}
+      <div style={S.rightSection}>
+        <div style={S.messageWrapper} key={message}>
+          {/* 말풍선 꼬리 */}
+          <div style={S.messageTail} />
+          
+          <div style={S.messageContent}>
+            {speaking && <AudioEqualizer />}
+            <span style={S.messageText}>{message}</span>
+          </div>
         </div>
+        
         {roundNumber && (
-          <div style={S.roundNumber}>#{roundNumber}</div>
+          <div style={S.roundBadge}>
+            ROUND {roundNumber}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
+// -----------------------------------------------------
+// 4. 스타일 정의 (Glassmorphism & Luxury)
+// -----------------------------------------------------
 const S = {
-  dealerArea: {
+  dealerContainer: {
     display: "flex", justifyContent: "space-between", alignItems: "center",
-    background: "linear-gradient(135deg, rgba(230,57,117,0.1), rgba(212,165,116,0.1))",
-    border: "1px solid rgba(212,165,116,0.3)",
-    borderRadius: 14, padding: "10px 14px", marginBottom: 12,
-    transition: "background 0.3s",
+    // 글래스모피즘 딥다크 배경
+    background: "linear-gradient(135deg, rgba(20, 20, 25, 0.85), rgba(10, 10, 15, 0.95))",
+    backdropFilter: "blur(10px)",
+    WebkitBackdropFilter: "blur(10px)",
+    borderRadius: 16, 
+    padding: "14px 20px", 
+    marginBottom: 16,
+    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
+    transition: "all 0.4s ease",
   },
-  dealerLeft: { display: "flex", gap: 12, alignItems: "center", flex: 1, minWidth: 0 },
-  dealerRight: { display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" },
+  leftSection: { 
+    display: "flex", gap: 16, alignItems: "center", flex: 1 
+  },
+  rightSection: { 
+    display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" 
+  },
+  dealerBadge: { 
+    fontSize: 9, color: "#D4A574", fontWeight: 700, letterSpacing: 2,
+    textTransform: "uppercase" 
+  },
   dealerName: { 
-    fontSize: 13, fontWeight: 900, color: "#D4A574", letterSpacing: 1,
-    display: "flex", alignItems: "center", gap: 6,
+    fontSize: 16, fontWeight: 900, color: "#FFFFFF", letterSpacing: 1,
+    display: "flex", alignItems: "center", gap: 8,
+    textShadow: "0 2px 4px rgba(0,0,0,0.5)"
   },
-  liveDot: { color: "#10B981", fontSize: 8, animation: "dealerPulse 1.5s ease-in-out infinite" },
-  dealerBadge: { fontSize: 9, color: "#E63975", fontWeight: 800, letterSpacing: 2, marginTop: 2 },
-  playerCount: { fontSize: 9, color: "rgba(255,255,255,0.5)", marginTop: 2, fontWeight: 600 },
-  dealerMessage: {
-    fontSize: 11, fontWeight: 700, color: "#fff", letterSpacing: 1,
-    textAlign: "right", maxWidth: 180,
-    background: "rgba(0,0,0,0.3)", padding: "6px 12px", borderRadius: 8,
-    border: "1px solid rgba(255,255,255,0.1)",
+  liveIndicator: { 
+    color: "#EF4444", fontSize: 10, 
+    animation: "liveDotBlink 2s infinite" 
   },
-  roundNumber: {
-    fontSize: 9, color: "rgba(212,165,116,0.6)", 
-    fontFamily: "monospace", letterSpacing: 1,
+  playerCount: { 
+    display: "flex", alignItems: "center",
+    fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 500 
+  },
+  messageWrapper: {
+    position: "relative",
+    animation: "messageFadeIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+  },
+  messageTail: {
+    position: "absolute",
+    right: -6, top: "50%", transform: "translateY(-50%)",
+    borderTop: "6px solid transparent",
+    borderBottom: "6px solid transparent",
+    borderLeft: "6px solid rgba(212, 165, 116, 0.15)",
+  },
+  messageContent: {
+    display: "flex", alignItems: "center",
+    background: "rgba(30, 30, 35, 0.6)",
+    border: "1px solid rgba(212, 165, 116, 0.2)",
+    padding: "8px 16px", borderRadius: 12,
+    boxShadow: "inset 0 1px 1px rgba(255,255,255,0.05), 0 4px 10px rgba(0,0,0,0.2)",
+  },
+  messageText: {
+    fontSize: 13, fontWeight: 600, color: "#F3F4F6", 
+    letterSpacing: 0.5, maxWidth: 220,
+    textShadow: "0 1px 2px rgba(0,0,0,0.5)"
+  },
+  roundBadge: {
+    fontSize: 10, color: "rgba(212, 165, 116, 0.7)", 
+    fontFamily: "Courier New, monospace", fontWeight: 700,
+    letterSpacing: 1.5, background: "rgba(0,0,0,0.4)",
+    padding: "3px 8px", borderRadius: 4, border: "1px solid rgba(212,165,116,0.1)"
   },
 };

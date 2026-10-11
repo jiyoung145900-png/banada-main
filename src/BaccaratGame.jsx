@@ -1048,12 +1048,28 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
               style={{...S.clearBetBtn, opacity: totalBet === 0 ? 0.4 : 1}}>BET RESET</button>
           </div>
 
-          {/* 자동 모드: 타이머 끝나면 자동 시작. 베팅 안 하면 "구경" 모드 */}
+          {/* 자동 모드 안내 */}
           <div style={S.autoModeInfo}>
             {totalMainBet > 0 
               ? `✅ BET PLACED (${totalBet.toLocaleString()}P) · 타이머 끝나면 자동 시작`
               : "💭 베팅 안 하면 '구경 모드' (돈 X, 결과만 쌓임)"}
           </div>
+
+          {/* ⏩ 지금 바로 시작 버튼 (타이머 안 기다리기) */}
+          <button 
+            onClick={handleAutoRoundStart}
+            style={{
+              ...S.actionBtn,
+              marginTop: 10,
+              background: totalMainBet > 0 
+                ? "linear-gradient(135deg, #D4A574, #B07D46)"
+                : "linear-gradient(135deg, #6B7280, #4B5563)",
+            }}
+          >
+            {totalMainBet > 0 
+              ? `⏩ 지금 바로 시작 (${totalBet.toLocaleString()}P)` 
+              : "⏩ 베팅 없이 구경하기"}
+          </button>
         </div>
       )}
 
