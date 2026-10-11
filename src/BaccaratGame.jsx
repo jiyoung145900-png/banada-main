@@ -712,8 +712,12 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     return handScore(revealedCards);
   };
 
-  const displayPScore = gameData ? getDisplayScore(gameData.player, pCards) : "-";
-  const displayBScore = gameData ? getDisplayScore(gameData.banker, bCards) : "-";
+  // 🔥 결과 발표 시 (result 단계)에는 반드시 최종 점수를 보여줌
+  //    쪼기 중 (squeezing)에는 공개된 카드만 기준
+  const displayPScore = result ? result.pScore 
+    : gameData ? getDisplayScore(gameData.player, pCards) : "-";
+  const displayBScore = result ? result.bScore 
+    : gameData ? getDisplayScore(gameData.banker, bCards) : "-";
 
   const unrevealedStates = ["back", "peek1", "peek2", "peek3"];
   const hasUnrevealed = 
@@ -953,7 +957,13 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
                 ? "linear-gradient(90deg, transparent, rgba(16,185,129,0.95), transparent)"
                 : "linear-gradient(90deg, transparent, rgba(0,0,0,0.9), transparent)",
             }}>
-              {result.net > 0 ? `WIN! +${result.net.toLocaleString()}` : result.net === 0 ? "PUSH" : `LOSE -${Math.abs(result.net).toLocaleString()}`}
+              <div style={{fontSize: 14, letterSpacing: 2, marginBottom: 4, opacity: 0.9}}>
+                {result.winner === "player" ? `🟦 PLAYER ${result.pScore} ` : result.winner === "banker" ? `🟥 BANKER ${result.bScore} ` : `🟩 TIE `}
+                WINS
+              </div>
+              <div style={{fontSize: 28}}>
+                {result.net > 0 ? `WIN! +${result.net.toLocaleString()}` : result.net === 0 ? "PUSH" : `LOSE -${Math.abs(result.net).toLocaleString()}`}
+              </div>
             </div>
           </div>
         )}
