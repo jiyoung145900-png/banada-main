@@ -343,7 +343,7 @@ export default function HomeSection({
                     “{text.length > 70 ? text.slice(0, 70) + "..." : text}”
                   </div>
                   <div style={h.reviewMeta}>
-                    {rv.displayName || getFakeNickname(rv.userId, fakeNicknameOverrides)}
+                    {rv.displayName || rv.userNickname || rv.userId || "익명"}
                     {(rv.loc || rv.region) ? ` · ${getRegionName(rv.loc || rv.region)}` : ""}
                   </div>
                 </div>

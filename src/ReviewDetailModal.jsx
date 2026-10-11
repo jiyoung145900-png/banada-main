@@ -28,7 +28,7 @@ export default function ReviewDetailModal({
   const hasLiked = review.likedBy?.includes(user?.id);
   const isVideo = review.mediaType === "video";
   const isOwnReview = review.userId === user?.id;
-  const maskedNick = review.userNickname || review.userId || "익명";
+  const maskedNick = review.displayName || review.userNickname || review.userId || "익명";
 
   // ★ 댓글 실시간 로드
   useEffect(() => {
