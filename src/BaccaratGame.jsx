@@ -13,6 +13,19 @@
 import React, { useState, useRef, useEffect } from "react";
 import BaccaratDealer from "./BaccaratDealer";
 import BaccaratRoadmap, { computeStats } from "./BaccaratRoadmap";
+import { 
+  speak, setVoiceEnabled, isVoiceEnabled,
+  setBgmEnabled, isBgmEnabled, startBGM, stopBGM
+} from "./BaccaratSound";
+
+// 라운드 번호 생성
+function generateRoundNumber() {
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return `BAC-${dateStr}-${Math.floor(Math.random() * 9000 + 1000)}`;
+}
+
+const BETTING_DURATION = 180;  // 3분 (초)
 
 // --- 글로벌 애니메이션 주입 ---
 const injectKeyframes = () => {
@@ -32,9 +45,45 @@ const injectKeyframes = () => {
       0%, 100% { opacity: 0.7; transform: translateX(-50%) scale(1); }
       50% { opacity: 1; transform: translateX(-50%) scale(1.2); }
     }
+    @keyframes confettiFall {
+      0% { transform: translateY(-30px) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(600px) rotate(720deg); opacity: 0; }
+    }
   `;
   document.head.appendChild(style);
 };
+
+// 🎆 Confetti - 승리 축하 효과
+function Confetti() {
+  const pieces = Array.from({ length: 40 }, (_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    delay: Math.random() * 1.5,
+    duration: 2 + Math.random() * 2,
+    color: ["#FFD700", "#FF6B9D", "#D4A574", "#10B981", "#3B82F6", "#E63975"][Math.floor(Math.random() * 6)],
+    size: 6 + Math.random() * 6,
+    shape: Math.random() > 0.5 ? "50%" : "0%",
+  }));
+  
+  return (
+    <div style={{
+      position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+      pointerEvents: "none", zIndex: 9999, overflow: "hidden",
+    }}>
+      {pieces.map(p => (
+        <div key={p.id} style={{
+          position: "absolute",
+          left: `${p.left}%`,
+          top: 0,
+          width: p.size, height: p.size,
+          background: p.color,
+          borderRadius: p.shape,
+          animation: `confettiFall ${p.duration}s ease-in ${p.delay}s forwards`,
+        }} />
+      ))}
+    </div>
+  );
+}
 
 // --- 게임 로직 ---
 const SUITS = ["♠", "♥", "♦", "♣"];
@@ -347,8 +396,20 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     playerPair: [], bankerPair: [], perfectPair: [],
   });
   const [history, setHistory] = useState([]);
-  const [showRoadmap, setShowRoadmap] = useState(true); // 베팅 전 참고용 - 기본 펼침
+  const [showRoadmap, setShowRoadmap] = useState(true);
   const stats = React.useMemo(() => computeStats(history), [history]);
+
+  // 🎰 Evolution 모드 기능들
+  const [bettingTimeLeft, setBettingTimeLeft] = useState(BETTING_DURATION);
+  const [roundNumber, setRoundNumber] = useState(generateRoundNumber);
+  const [playerCount, setPlayerCount] = useState(23);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [bgmOn, setBgmOn] = useState(false);  // 기본 OFF (유저가 켤 수 있음)
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [noMoreBetsFlash, setNoMoreBetsFlash] = useState(false);
+  const [dealerSpeaking, setDealerSpeaking] = useState(false);
+  const bettingTimerRef = useRef(null);
+  const spectatorMode = useRef(false);  // 베팅 안 걸고 구경만 할 때
   
   // phase: "betting" | "dealing" | "squeezing" | "result"
   const [phase, setPhase] = useState("betting");
@@ -462,9 +523,10 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     );
   };
 
-  // 🎲 게임 시작
+  // 🎲 게임 시작 (자동/수동 모두 지원)
   const handlePlay = async () => {
-    if (!canPlay) return;
+    // 자동 모드 or 수동 베팅 모두 허용
+    if (phase !== "betting") return;
     
     const game = playBaccarat();
     setGameData(game);
@@ -473,6 +535,8 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
 
     setPCards(["empty", "empty"]);
     setBCards(["empty", "empty"]);
+    
+    speakDealer("Dealing");
     
     // 순차 딜링 (P1 → B1 → P2 → B2)
     for (let i = 0; i < 2; i++) {
@@ -598,14 +662,35 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     const net = totalPayout - totalBet;
     const won = net > 0;
 
-    onPointsChange(points - totalBet + totalPayout);
+    // 구경 모드면 돈 계산 X, 히스토리/로드맵만 추가
+    if (!spectatorMode.current) {
+      onPointsChange(points - totalBet + totalPayout);
+    }
+    
     setResult({ ...game, winner, won, payout: totalPayout, net, sideResults,
-      mainWon: mainBets[winner] > 0, sidePayout });
-    setHistory(prev => [...prev, winner].slice(-80));  // 오래된→최신 순, 최대 80개
+      mainWon: mainBets[winner] > 0, sidePayout, spectator: spectatorMode.current });
+    setHistory(prev => [...prev, winner].slice(-80));
     setPhase("result");
+
+    // 🎤 결과 발표
+    const winName = winner === "player" ? "Player wins" : winner === "banker" ? "Banker wins" : "Tie";
+    speakDealer(winName);
+    setDealerSpeaking(true);
+    setTimeout(() => setDealerSpeaking(false), 2000);
+
+    // 🎆 승리 시 폭죽
+    if (won && !spectatorMode.current) {
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3000);
+    }
+
+    // ⏭️ 자동 다음 라운드 (5초 후)
+    setTimeout(() => {
+      autoNextRound();
+    }, 5000);
   };
 
-  const resetGame = () => {
+  const autoNextRound = () => {
     setResult(null);
     setGameData(null);
     setBetStacks({ player: [], tie: [], banker: [], playerPair: [], bankerPair: [], perfectPair: [] });
@@ -613,6 +698,12 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     setBCards(["empty", "empty"]);
     setPhase("betting");
     thirdCardAddedRef.current = false;
+    setRoundNumber(generateRoundNumber());
+    spectatorMode.current = false;
+  };
+
+  const resetGame = () => {
+    autoNextRound();
   };
 
   const getDisplayScore = (cards, cardStates) => {
@@ -628,6 +719,92 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
   const hasUnrevealed = 
     pCards.some(s => unrevealedStates.includes(s)) ||
     bCards.some(s => unrevealedStates.includes(s));
+
+  // ⏰ 베팅 타이머 (자동 진행)
+  useEffect(() => {
+    if (phase !== "betting") {
+      if (bettingTimerRef.current) {
+        clearInterval(bettingTimerRef.current);
+        bettingTimerRef.current = null;
+      }
+      return;
+    }
+
+    setBettingTimeLeft(BETTING_DURATION);
+    speakDealer("Place your bets, please");
+    setDealerSpeaking(true);
+    setTimeout(() => setDealerSpeaking(false), 2500);
+
+    bettingTimerRef.current = setInterval(() => {
+      setBettingTimeLeft(prev => {
+        // 음성 알림
+        if (prev === 31) { speakDealer("30 seconds left"); setDealerSpeaking(true); setTimeout(()=>setDealerSpeaking(false), 1800); }
+        if (prev === 11) { speakDealer("10 seconds, final bets"); setDealerSpeaking(true); setTimeout(()=>setDealerSpeaking(false), 2000); }
+        
+        if (prev <= 1) {
+          clearInterval(bettingTimerRef.current);
+          bettingTimerRef.current = null;
+          // ⏰ 타이머 끝 → 자동으로 라운드 진행
+          handleAutoRoundStart();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (bettingTimerRef.current) clearInterval(bettingTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, roundNumber]);
+
+  // 👥 가짜 플레이어 수 변동 (분위기)
+  useEffect(() => {
+    const t = setInterval(() => {
+      setPlayerCount(prev => {
+        const change = Math.floor(Math.random() * 5) - 2;
+        return Math.max(15, Math.min(45, prev + change));
+      });
+    }, 3500);
+    return () => clearInterval(t);
+  }, []);
+
+  // 🔊 BGM 토글 효과
+  useEffect(() => {
+    if (bgmOn) startBGM();
+    else stopBGM();
+    return () => stopBGM();
+  }, [bgmOn]);
+
+  const speakDealer = (text) => {
+    if (voiceOn) speak(text);
+  };
+
+  const toggleVoice = () => {
+    const newVal = !voiceOn;
+    setVoiceOn(newVal);
+    setVoiceEnabled(newVal);
+  };
+  const toggleBgm = () => {
+    const newVal = !bgmOn;
+    setBgmOn(newVal);
+    setBgmEnabled(newVal);
+  };
+
+  // 자동 라운드 시작 (타이머 끝)
+  const handleAutoRoundStart = async () => {
+    // "No more bets!" 플래시
+    setNoMoreBetsFlash(true);
+    speakDealer("No more bets!");
+    setDealerSpeaking(true);
+    await sleep(2000);
+    setDealerSpeaking(false);
+    setNoMoreBetsFlash(false);
+
+    // 베팅 있으면 정상, 없으면 구경 모드
+    spectatorMode.current = totalMainBet === 0;
+    handlePlay();
+  };
 
   // 💁 딜러 메시지
   const getDealerMessage = () => {
@@ -652,7 +829,52 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
       </div>
 
       {/* 💁 딜러 영역 */}
-      <BaccaratDealer phase={phase} message={dealerMessage} />
+      <BaccaratDealer 
+        phase={phase} 
+        message={dealerMessage}
+        roundNumber={roundNumber}
+        playerCount={playerCount}
+        speaking={dealerSpeaking}
+        noMoreBets={noMoreBetsFlash}
+      />
+
+      {/* ⏰ 베팅 타이머 바 (phase === betting 일 때만) */}
+      {phase === "betting" && (
+        <div style={S.timerBar}>
+          <div style={{...S.timerFill, 
+            width: `${(bettingTimeLeft / BETTING_DURATION) * 100}%`,
+            background: bettingTimeLeft <= 10 
+              ? "linear-gradient(90deg, #DC2626, #EF4444)"
+              : bettingTimeLeft <= 30
+              ? "linear-gradient(90deg, #D97706, #F59E0B)"
+              : "linear-gradient(90deg, #10B981, #34D399)",
+          }} />
+          <div style={S.timerText}>
+            ⏰ BETTING TIME: {Math.floor(bettingTimeLeft / 60)}:{String(bettingTimeLeft % 60).padStart(2, '0')}
+          </div>
+        </div>
+      )}
+
+      {/* 🔊 음성/BGM 토글 */}
+      <div style={S.soundControls}>
+        <button onClick={toggleVoice} style={{
+          ...S.soundBtn, 
+          background: voiceOn ? "rgba(16,185,129,0.2)" : "rgba(100,100,100,0.2)",
+          borderColor: voiceOn ? "#10B981" : "rgba(255,255,255,0.1)",
+        }}>
+          🔊 Voice {voiceOn ? "ON" : "OFF"}
+        </button>
+        <button onClick={toggleBgm} style={{
+          ...S.soundBtn, 
+          background: bgmOn ? "rgba(16,185,129,0.2)" : "rgba(100,100,100,0.2)",
+          borderColor: bgmOn ? "#10B981" : "rgba(255,255,255,0.1)",
+        }}>
+          🎵 BGM {bgmOn ? "ON" : "OFF"}
+        </button>
+      </div>
+
+      {/* 🎆 승리 폭죽 */}
+      {showConfetti && <Confetti />}
 
       {/* 📊 통계 바 */}
       {stats.total > 0 && (
@@ -826,9 +1048,12 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
               style={{...S.clearBetBtn, opacity: totalBet === 0 ? 0.4 : 1}}>BET RESET</button>
           </div>
 
-          <button onClick={handlePlay} disabled={!canPlay} style={{...S.actionBtn, opacity: canPlay ? 1 : 0.5}}>
-            {totalMainBet > 0 ? `START (${totalBet.toLocaleString()}P)` : "PLACE A MAIN BET FIRST"}
-          </button>
+          {/* 자동 모드: 타이머 끝나면 자동 시작. 베팅 안 하면 "구경" 모드 */}
+          <div style={S.autoModeInfo}>
+            {totalMainBet > 0 
+              ? `✅ BET PLACED (${totalBet.toLocaleString()}P) · 타이머 끝나면 자동 시작`
+              : "💭 베팅 안 하면 '구경 모드' (돈 X, 결과만 쌓임)"}
+          </div>
         </div>
       )}
 
@@ -845,7 +1070,14 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
       )}
 
       {phase === "result" && (
-        <button onClick={resetGame} style={S.actionBtn}>REBET / NEXT ROUND</button>
+        <div>
+          <div style={S.autoModeInfo}>
+            ⏭️ 5초 뒤 자동으로 다음 라운드 시작
+          </div>
+          <button onClick={resetGame} style={{...S.actionBtn, marginTop: 8}}>
+            ⏩ 바로 다음 라운드
+          </button>
+        </div>
       )}
     </div>
   );
@@ -879,6 +1111,46 @@ const S = {
     color: "#D4A574", padding: "6px 4px",
     background: "rgba(212,165,116,0.1)", borderRadius: 6,
     letterSpacing: 1,
+  },
+
+  // 자동 모드 안내
+  autoModeInfo: {
+    marginTop: 10, padding: 12,
+    background: "rgba(212,165,116,0.08)",
+    border: "1px dashed rgba(212,165,116,0.3)",
+    borderRadius: 10,
+    textAlign: "center", fontSize: 12, color: "#D4A574", fontWeight: 700,
+    letterSpacing: 0.5,
+  },
+
+  // ⏰ 베팅 타이머 바
+  timerBar: {
+    position: "relative", height: 32, borderRadius: 10,
+    background: "rgba(0,0,0,0.5)",
+    border: "1px solid rgba(212,165,116,0.3)",
+    marginBottom: 12, overflow: "hidden",
+  },
+  timerFill: {
+    position: "absolute", top: 0, left: 0, bottom: 0,
+    transition: "width 1s linear, background 0.3s",
+    opacity: 0.4,
+  },
+  timerText: {
+    position: "relative", height: "100%", display: "flex",
+    alignItems: "center", justifyContent: "center",
+    color: "#fff", fontSize: 12, fontWeight: 900, letterSpacing: 2,
+    textShadow: "0 1px 3px rgba(0,0,0,0.8)",
+  },
+
+  // 🔊 음성/BGM 토글
+  soundControls: {
+    display: "flex", gap: 8, marginBottom: 12,
+  },
+  soundBtn: {
+    flex: 1, padding: "8px", borderRadius: 10, cursor: "pointer",
+    border: "1px solid",
+    color: "#fff", fontSize: 11, fontWeight: 700, letterSpacing: 1,
+    transition: "all 0.2s",
   },
 
   // 🀄 로드맵 섹션 (베팅 결정 참고용 - 테이블 위에 위치)
