@@ -62,7 +62,13 @@ export default function ReviewDetailModal({
     const min = Math.floor(diff / 60000);
     const hour = Math.floor(diff / 3600000);
     const day = Math.floor(diff / 86400000);
+    const week = Math.floor(day / 7);
+    const month = Math.floor(day / 30);
+    const year = Math.floor(day / 365);
     
+    if (year > 0) return isKo ? `${year}년 전` : isJa ? `${year}年前` : `${year}y ago`;
+    if (month > 0) return isKo ? `${month}개월 전` : isJa ? `${month}ヶ月前` : `${month}mo ago`;
+    if (week > 0) return isKo ? `${week}주 전` : isJa ? `${week}週間前` : `${week}w ago`;
     if (day > 0) return isKo ? `${day}일 전` : isJa ? `${day}日前` : `${day}d ago`;
     if (hour > 0) return isKo ? `${hour}시간 전` : isJa ? `${hour}時間前` : `${hour}h ago`;
     if (min > 0) return isKo ? `${min}분 전` : isJa ? `${min}分前` : `${min}m ago`;
