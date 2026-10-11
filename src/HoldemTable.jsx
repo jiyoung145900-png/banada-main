@@ -1,61 +1,101 @@
 // ===================================================================
-// 🎰 HoldemTable - 실제 플레이 테이블 (Firestore 실시간)
-// ===================================================================
-// Props:
-//   tableId, userId, userName
-//   gamePoints, onPointsChange
-//   onLeave: 로비로 돌아가기
+// 🎰 HoldemTable - Evolution 2.5D Poker (모바일 우선 + 안정화)
 // ===================================================================
 
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  subscribeTable, leaveTable, startGame, playerAction, nextRound, deleteTable
-} from "./HoldemFirestore";
+import { subscribeTable, leaveTable, startGame, playerAction, nextRound } from "./HoldemFirestore";
 import { evaluateHand } from "./HoldemLogic";
+
+// 에볼루션 전용 애니메이션 주입
+const injectAnimations = () => {
+  if (document.getElementById("evo-holdem-styles")) return;
+  const style = document.createElement("style");
+  style.id = "evo-holdem-styles";
+  style.innerHTML = `
+    @keyframes dealCard { 0% { opacity: 0; transform: translate(0, -100px) scale(0.2); } 100% { opacity: 1; transform: translate(0,0) scale(1); } }
+    @keyframes flipCard { 0% { transform: rotateY(90deg); opacity: 0.5; } 100% { transform: rotateY(0deg); opacity: 1; } }
+    @keyframes activeTurnPulse { 0% { box-shadow: 0 0 0 0 rgba(212,165,116,0.6); } 70% { box-shadow: 0 0 0 15px rgba(212,165,116,0); } 100% { box-shadow: 0 0 0 0 rgba(212,165,116,0); } }
+    @keyframes potGlow { 0%, 100% { text-shadow: 0 0 10px rgba(253,224,71,0.5); } 50% { text-shadow: 0 0 20px rgba(253,224,71,1); } }
+    @keyframes errorShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+    .holdem-range-slider { -webkit-appearance: none; width: 100%; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.2); outline: none; }
+    .holdem-range-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, #D4A574, #B07D46); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
+    .holdem-range-slider::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, #D4A574, #B07D46); cursor: pointer; border: none; }
+  `;
+  document.head.appendChild(style);
+};
+
+// 🪑 좌석 포지션 - 플레이어 수에 따라 동적 (내 자리는 항상 하단 중앙)
+function getSeatPositions(totalPlayers) {
+  const configs = {
+    2: [
+      { bottom: "0%", left: "50%", transform: "translateX(-50%)" },      // 0: 나 (하단)
+      { top: "0%", left: "50%", transform: "translateX(-50%)" },         // 1: 상단
+    ],
+    3: [
+      { bottom: "0%", left: "50%", transform: "translateX(-50%)" },      // 0: 나 (하단)
+      { top: "10%", left: "5%" },                                        // 1: 좌측 상단
+      { top: "10%", right: "5%" },                                       // 2: 우측 상단
+    ],
+    4: [
+      { bottom: "0%", left: "50%", transform: "translateX(-50%)" },      // 0: 나 (하단)
+      { top: "50%", left: "0%", transform: "translateY(-50%)" },         // 1: 좌측 중앙
+      { top: "0%", left: "50%", transform: "translateX(-50%)" },         // 2: 상단 중앙
+      { top: "50%", right: "0%", transform: "translateY(-50%)" },        // 3: 우측 중앙
+    ],
+    5: [
+      { bottom: "0%", left: "50%", transform: "translateX(-50%)" },      // 0: 나 (하단)
+      { bottom: "25%", left: "0%" },                                     // 1: 좌측 하단
+      { top: "5%", left: "8%" },                                         // 2: 좌측 상단
+      { top: "5%", right: "8%" },                                        // 3: 우측 상단
+      { bottom: "25%", right: "0%" },                                    // 4: 우측 하단
+    ],
+    6: [
+      { bottom: "0%", left: "50%", transform: "translateX(-50%)" },      // 0: 나 (하단)
+      { bottom: "25%", left: "0%" },                                     // 1: 좌측 하단
+      { top: "15%", left: "3%" },                                        // 2: 좌측 상단
+      { top: "0%", left: "50%", transform: "translateX(-50%)" },         // 3: 상단 중앙
+      { top: "15%", right: "3%" },                                       // 4: 우측 상단
+      { bottom: "25%", right: "0%" },                                    // 5: 우측 하단
+    ],
+  };
+  return configs[totalPlayers] || configs[6];
+}
 
 export default function HoldemTable({ tableId, userId, userName, gamePoints, onPointsChange, onLeave }) {
   const [table, setTable] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [raiseAmount, setRaiseAmount] = useState(0);
-  const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState("");
   const prevChipsRef = useRef({});
 
-  // Firestore 실시간 구독
+  useEffect(() => { injectAnimations(); }, []);
+
   useEffect(() => {
     const unsub = subscribeTable(tableId, (t) => {
-      if (!t) {
-        onLeave();  // 테이블 삭제됨
-        return;
-      }
-      
-      // 칩 변동 감지 → 포인트 반영
+      if (!t) return onLeave();
       const me = t.players.find(p => p.userId === userId);
-      if (me && prevChipsRef.current[userId] !== undefined) {
-        const diff = me.chips - prevChipsRef.current[userId];
-        if (diff !== 0) {
-          // 서버에서 받은 chips 변화를 로컬 gamePoints 에 반영 안 함
-          // → 떠날 때 한번에 반영 (여기서는 그냥 표시만)
-        }
-      }
       if (me) prevChipsRef.current[userId] = me.chips;
-      
       setTable(t);
-      setLoading(false);
     });
     return unsub;
-  }, [tableId, userId]);
+  }, [tableId, userId, onLeave]);
 
-  const handleLeave = async () => {
-    const me = table?.players.find(p => p.userId === userId);
-    if (me && me.chips > 0 && table.status !== "playing") {
-      // 남은 칩 포인트로 환원
-      onPointsChange(gamePoints + me.chips);
+  // 에러 자동 숨김
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(""), 4000);
+    return () => clearTimeout(t);
+  }, [error]);
+
+  const handleAction = async (action, amount = 0) => {
+    setActionLoading(true);
+    setError("");
+    try { 
+      await playerAction({ tableId, userId, action, amount }); 
+    } catch (e) {
+      setError("액션 실패: " + e.message);
     }
-    try {
-      await leaveTable({ tableId, userId });
-    } catch (e) {}
-    onLeave();
+    setActionLoading(false);
   };
 
   const handleStart = async () => {
@@ -64,185 +104,230 @@ export default function HoldemTable({ tableId, userId, userName, gamePoints, onP
     try {
       await startGame(tableId);
     } catch (e) {
-      setError(e.message);
-    }
-    setActionLoading(false);
-  };
-
-  const handleAction = async (action, amount = 0) => {
-    setActionLoading(true);
-    setError("");
-    try {
-      await playerAction({ tableId, userId, action, amount });
-    } catch (e) {
-      setError(e.message);
+      setError("게임 시작 실패: " + e.message);
     }
     setActionLoading(false);
   };
 
   const handleNextRound = async () => {
     setActionLoading(true);
+    setError("");
     try {
       await nextRound(tableId);
     } catch (e) {
-      setError(e.message);
+      setError("다음 라운드 실패: " + e.message);
     }
     setActionLoading(false);
   };
 
-  if (loading || !table) {
-    return <div style={S.loading}>테이블 로딩 중...</div>;
-  }
+  const handleLeave = async () => {
+    const me = table?.players.find(p => p.userId === userId);
+    if (me && me.chips > 0 && table.status !== "playing") {
+      onPointsChange(gamePoints + me.chips);
+    }
+    try {
+      await leaveTable({ tableId, userId });
+    } catch (e) {}
+    onLeave();
+  };
+
+  if (!table) return <div style={S.loadingScreen}>LOADING VIP ROOM...</div>;
 
   const me = table.players.find(p => p.userId === userId);
   const myIdx = table.players.findIndex(p => p.userId === userId);
   const isMyTurn = myIdx === table.currentPlayerIdx && table.status === "playing";
-  const canStart = table.status === "waiting" && table.players.length >= 2;
   const isShowdown = table.phase === "showdown";
   const callAmount = me ? Math.max(0, table.currentBet - me.bet) : 0;
   const minRaise = table.currentBet + table.bigBlind;
 
+  // 🔹 Hero Centering - 플레이어 수에 따른 동적 좌석
+  const totalPlayers = table.players.length;
+  const seatPositions = getSeatPositions(totalPlayers);
+  
+  const getVisualSeatStyle = (actualIdx) => {
+    if (myIdx === -1) return seatPositions[actualIdx] || seatPositions[0]; // 관전자
+    const visualIdx = (actualIdx - myIdx + totalPlayers) % totalPlayers;
+    return seatPositions[visualIdx];
+  };
+
   return (
     <div style={S.container}>
-      {/* 헤더 */}
-      <div style={S.header}>
-        <button onClick={handleLeave} style={S.backBtn}>← 나가기</button>
-        <h2 style={S.title}>{table.name}</h2>
-        <div style={S.phaseBadge}>{getPhaseName(table.phase)}</div>
+      {/* 상단 바 */}
+      <div style={S.topBar}>
+        <button onClick={handleLeave} style={S.backBtn}>❮ LEAVE</button>
+        <div style={S.tableTitle}>
+          {table.name} 
+          <span style={S.blindText}>{table.smallBlind}/{table.bigBlind}</span>
+        </div>
+        <div style={S.phaseBadge}>{table.phase.toUpperCase()}</div>
       </div>
 
-      {error && <div style={S.error}>{error}</div>}
+      {/* 에러 */}
+      {error && (
+        <div style={{...S.errorBanner, animation: "errorShake 0.3s"}}>
+          ⚠ {error}
+        </div>
+      )}
 
-      {/* 테이블 (타원형) */}
-      <div style={S.tableArea}>
-        <div style={S.tableFelt}>
-          {/* 중앙: 팟 + 공유 카드 */}
-          <div style={S.centerArea}>
-            <div style={S.potBox}>
-              <div style={S.potLabel}>POT</div>
-              <div style={S.potValue}>{table.pot.toLocaleString()}</div>
-            </div>
+      {/* 🔹 2.5D 테이블 영역 */}
+      <div style={S.room}>
+        <div style={S.tableMat}>
+          <div style={S.tableInnerRing}>
             
-            <div style={S.communityCards}>
-              {[0,1,2,3,4].map(i => (
-                <CommunityCard key={i} card={table.communityCards[i]} />
-              ))}
-            </div>
-            
-            {table.currentBet > 0 && (
-              <div style={S.betInfo}>Current Bet: {table.currentBet.toLocaleString()}</div>
-            )}
-          </div>
+            {/* 중앙 팟 & 커뮤니티 카드 */}
+            <div style={S.centerArea}>
+              <div style={S.mainPot}>
+                <div style={S.potLabel}>POT</div>
+                <div style={S.potValue}>{table.pot.toLocaleString()}</div>
+              </div>
 
-          {/* 플레이어들 (주변) */}
-          <div style={S.playersGrid}>
+              <div style={S.communityBoard}>
+                {[0, 1, 2, 3, 4].map((i) => {
+                  const card = table.communityCards[i];
+                  return card ? (
+                    <div key={i} style={{animation: "flipCard 0.4s ease-out forwards"}}>
+                      <PremiumCard card={card} />
+                    </div>
+                  ) : (
+                    <div key={i} style={S.cardOutline} />
+                  );
+                })}
+              </div>
+
+              {table.currentBet > 0 && (
+                <div style={S.currentBetInfo}>Current Bet: {table.currentBet.toLocaleString()}</div>
+              )}
+            </div>
+
+            {/* 플레이어 좌석 (동적 배치) */}
             {table.players.map((p, i) => (
-              <PlayerSeat 
-                key={p.userId}
-                player={p}
-                isMe={p.userId === userId}
-                isCurrent={i === table.currentPlayerIdx && table.status === "playing"}
-                isDealer={i === table.dealerIdx}
-                isWinner={false}
-                showCards={isShowdown || p.userId === userId}
-                position={i}
-                total={table.players.length}
-              />
+              <div 
+                key={p.userId} 
+                style={{
+                  ...S.seatContainer, 
+                  ...getVisualSeatStyle(i), 
+                  zIndex: i === table.currentPlayerIdx ? 20 : 10
+                }}
+              >
+                <PlayerNode 
+                  player={p} 
+                  isMe={p.userId === userId} 
+                  isActive={i === table.currentPlayerIdx && table.status === "playing"} 
+                  isDealer={i === table.dealerIdx}
+                  showCards={isShowdown || p.userId === userId} 
+                />
+              </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* 하단 액션 영역 */}
-      <div style={S.actionArea}>
-        {/* 대기 중 - 게임 시작 버튼 */}
-        {table.status === "waiting" && table.phase !== "showdown" && (
-          <>
-            <div style={S.waitingMsg}>
-              {table.players.length < 2 
-                ? `⏳ 다른 플레이어 기다리는 중 (${table.players.length}/${table.maxPlayers})`
-                : `✅ ${table.players.length}명 준비됨`}
-            </div>
-            {canStart && (
-              <button onClick={handleStart} disabled={actionLoading} style={S.startBtn}>
-                {actionLoading ? "시작 중..." : "🎲 게임 시작"}
+      {/* 🔹 하단 HUD */}
+      <div style={S.hud}>
+        {/* 대기 중 */}
+        {table.status === "waiting" && !isShowdown && (
+          <div style={S.centerBox}>
+            <p style={S.waitingText}>
+              Waiting for players... ({table.players.length}/{table.maxPlayers})
+            </p>
+            {table.players.length >= 2 && (
+              <button 
+                onClick={handleStart} 
+                disabled={actionLoading} 
+                style={{...S.startBtn, opacity: actionLoading ? 0.5 : 1}}
+              >
+                {actionLoading ? "DEALING..." : "DEAL CARDS"}
               </button>
             )}
-          </>
+          </div>
         )}
 
         {/* 쇼다운 */}
         {isShowdown && (
-          <>
+          <div style={S.showdownPanel}>
             <ShowdownResult table={table} userId={userId} />
-            <button onClick={handleNextRound} disabled={actionLoading} style={S.startBtn}>
-              {actionLoading ? "준비 중..." : "⏭ 다음 라운드"}
+            <button 
+              onClick={handleNextRound} 
+              disabled={actionLoading} 
+              style={{...S.nextRoundBtn, opacity: actionLoading ? 0.5 : 1}}
+            >
+              {actionLoading ? "..." : "NEXT HAND ❯"}
             </button>
-          </>
+          </div>
         )}
 
         {/* 플레이 중 */}
         {table.status === "playing" && !isShowdown && me && (
-          <>
-            {isMyTurn ? (
-              <div>
-                <div style={S.yourTurnBadge}>🎯 당신 차례!</div>
-                <div style={S.actionButtons}>
-                  <button onClick={() => handleAction("fold")} disabled={actionLoading} style={{...S.actBtn, background: "#6B7280"}}>
+          <div style={S.actionPanel}>
+            {!isMyTurn ? (
+              <div style={S.waitingTurnText}>
+                Waiting for <strong style={{color:"#D4A574"}}>{table.players[table.currentPlayerIdx]?.nickname}</strong>...
+              </div>
+            ) : (
+              <div style={S.myControls}>
+                {/* 레이즈 슬라이더 */}
+                {me.chips > callAmount + table.bigBlind && (
+                  <div style={S.raiseArea}>
+                    <div style={S.raiseHeader}>
+                      <span>Raise to: <strong style={S.raiseValue}>{(raiseAmount || minRaise).toLocaleString()}</strong></span>
+                      <div style={S.quickBtnGroup}>
+                        <button onClick={()=>setRaiseAmount(minRaise)} style={S.quickBtn}>MIN</button>
+                        <button onClick={()=>setRaiseAmount(Math.min(me.chips + me.bet, Math.max(table.pot, minRaise)))} style={S.quickBtn}>POT</button>
+                        <button onClick={()=>setRaiseAmount(me.chips + me.bet)} style={S.quickBtn}>MAX</button>
+                      </div>
+                    </div>
+                    <input 
+                      type="range" 
+                      min={minRaise} 
+                      max={me.chips + me.bet} 
+                      value={raiseAmount || minRaise} 
+                      onChange={(e)=>setRaiseAmount(Number(e.target.value))} 
+                      className="holdem-range-slider" 
+                    />
+                  </div>
+                )}
+                
+                {/* 메인 액션 버튼 */}
+                <div style={S.buttonGroup}>
+                  <button 
+                    onClick={() => handleAction("fold")} 
+                    disabled={actionLoading} 
+                    style={{...S.actionBtn, background: "linear-gradient(to bottom, #4B5563, #374151)"}}
+                  >
                     FOLD
                   </button>
                   {callAmount === 0 ? (
-                    <button onClick={() => handleAction("check")} disabled={actionLoading} style={{...S.actBtn, background: "#3B82F6"}}>
+                    <button 
+                      onClick={() => handleAction("check")} 
+                      disabled={actionLoading} 
+                      style={{...S.actionBtn, background: "linear-gradient(to bottom, #10B981, #059669)"}}
+                    >
                       CHECK
                     </button>
                   ) : (
-                    <button onClick={() => handleAction("call")} disabled={actionLoading || callAmount > me.chips} style={{...S.actBtn, background: "#10B981"}}>
+                    <button 
+                      onClick={() => handleAction("call")} 
+                      disabled={actionLoading || callAmount > me.chips} 
+                      style={{...S.actionBtn, background: "linear-gradient(to bottom, #3B82F6, #2563EB)"}}
+                    >
                       CALL {callAmount.toLocaleString()}
                     </button>
                   )}
                   {me.chips > callAmount && (
-                    <button onClick={() => handleAction("all-in")} disabled={actionLoading} style={{...S.actBtn, background: "#EF4444"}}>
-                      ALL-IN
+                    <button 
+                      onClick={() => handleAction(
+                        me.chips > callAmount + table.bigBlind ? "raise" : "all-in", 
+                        raiseAmount || minRaise
+                      )} 
+                      disabled={actionLoading} 
+                      style={{...S.actionBtn, background: "linear-gradient(to bottom, #D4A574, #B07D46)", color:"#000"}}
+                    >
+                      {me.chips > callAmount + table.bigBlind ? "RAISE" : "ALL-IN"}
                     </button>
                   )}
                 </div>
-                
-                {me.chips > callAmount + table.bigBlind && (
-                  <div style={S.raiseRow}>
-                    <input
-                      type="number"
-                      value={raiseAmount || minRaise}
-                      onChange={e => setRaiseAmount(Number(e.target.value) || 0)}
-                      min={minRaise}
-                      max={me.chips + me.bet}
-                      style={S.raiseInput}
-                      placeholder={`최소 ${minRaise}`}
-                    />
-                    <button 
-                      onClick={() => handleAction("raise", raiseAmount || minRaise)}
-                      disabled={actionLoading || !raiseAmount || raiseAmount < minRaise || raiseAmount > me.chips + me.bet}
-                      style={{...S.actBtn, flex: 1, background: "#D4A574", color: "#000"}}
-                    >
-                      RAISE {(raiseAmount || minRaise).toLocaleString()}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div style={S.waitingTurnMsg}>
-                ⏳ {table.players[table.currentPlayerIdx]?.nickname || "..."} 차례
               </div>
             )}
-          </>
-        )}
-
-        {/* 히스토리 (최근 5개) */}
-        {table.history && table.history.length > 0 && (
-          <div style={S.historyBox}>
-            <div style={S.historyTitle}>📋 LOG</div>
-            {table.history.slice(-5).reverse().map((h, i) => (
-              <div key={i} style={S.historyItem}>{h.event}</div>
-            ))}
           </div>
         )}
       </div>
@@ -250,227 +335,339 @@ export default function HoldemTable({ tableId, userId, userName, gamePoints, onP
   );
 }
 
-// ────────────────────────────────────────
+// -----------------------------------------------------
 // 서브 컴포넌트
-// ────────────────────────────────────────
-
-function CommunityCard({ card }) {
-  if (!card) {
-    return <div style={{...S.card, background: "rgba(255,255,255,0.03)", border: "2px dashed rgba(212,165,116,0.2)"}} />;
-  }
+// -----------------------------------------------------
+function PremiumCard({ card, isHole = false }) {
   const isRed = card.suit === "♥" || card.suit === "♦";
-  return (
-    <div style={{...S.card, background: "#fff", color: isRed ? "#E63975" : "#1F0817"}}>
-      <div style={S.cardRank}>{card.rank}</div>
-      <div style={S.cardSuit}>{card.suit}</div>
-    </div>
-  );
-}
-
-function PlayerSeat({ player, isMe, isCurrent, isDealer, showCards, position, total }) {
-  const seatBg = player.folded ? "rgba(50,50,50,0.5)" :
-                 isCurrent ? "linear-gradient(135deg, rgba(255,215,0,0.3), rgba(212,165,116,0.2))" :
-                 isMe ? "linear-gradient(135deg, rgba(16,185,129,0.3), rgba(5,150,105,0.2))" :
-                 "rgba(255,255,255,0.05)";
-  
   return (
     <div style={{
-      ...S.playerSeat,
-      background: seatBg,
-      border: isCurrent ? "2px solid #FFD700" : "1px solid rgba(255,255,255,0.1)",
-      opacity: player.folded ? 0.4 : 1,
+      ...S.cardBody, 
+      width: isHole ? 32 : 44, 
+      height: isHole ? 46 : 64, 
+      color: isRed ? "#EF4444" : "#111827"
     }}>
-      <div style={S.playerHeader}>
-        <span style={S.playerName}>{player.nickname}{isMe ? " (나)" : ""}</span>
-        {isDealer && <span style={S.dealerChip}>D</span>}
-      </div>
-      <div style={S.playerCards}>
-        {player.cards && player.cards.length > 0 ? player.cards.map((c, i) => (
-          showCards ? (
-            <MiniCard key={i} card={c} />
-          ) : (
-            <div key={i} style={S.cardBack} />
-          )
-        )) : <span style={S.noCards}>-</span>}
-      </div>
-      <div style={S.playerStats}>
-        <div style={S.chipsLabel}>💰 {player.chips.toLocaleString()}</div>
-        {player.bet > 0 && <div style={S.betLabel}>BET {player.bet.toLocaleString()}</div>}
-        {player.allIn && <div style={S.allInLabel}>ALL-IN</div>}
-        {player.folded && <div style={S.foldedLabel}>FOLD</div>}
-      </div>
+      <div style={{fontSize: isHole ? 12 : 18, fontWeight: 900, lineHeight: 1}}>{card.rank}</div>
+      <div style={{fontSize: isHole ? 14 : 22, lineHeight: 1, marginTop: -2}}>{card.suit}</div>
     </div>
   );
 }
 
-function MiniCard({ card }) {
-  const isRed = card.suit === "♥" || card.suit === "♦";
+function PlayerNode({ player, isMe, isActive, isDealer, showCards }) {
+  const folded = player.folded;
   return (
-    <div style={{...S.miniCard, color: isRed ? "#E63975" : "#1F0817"}}>
-      <div style={{fontSize: 10, fontWeight: 900}}>{card.rank}</div>
-      <div style={{fontSize: 12}}>{card.suit}</div>
+    <div style={{
+      display: "flex", 
+      flexDirection: "column", 
+      alignItems: "center", 
+      opacity: folded ? 0.4 : 1,
+      position: "relative",
+    }}>
+      
+      {/* 홀카드 (아바타 위에) */}
+      {player.cards?.length > 0 && (
+        <div style={S.holeCardsWrap}>
+          {player.cards.map((c, i) => (
+            <div 
+              key={i} 
+              style={{
+                transform: i === 1 ? "rotate(10deg) translateX(-10px)" : "rotate(-10deg)", 
+                animation: "dealCard 0.4s ease-out forwards", 
+                animationDelay: `${i*0.1}s`,
+              }}
+            >
+              {showCards ? <PremiumCard card={c} isHole /> : <div style={S.cardBack} />}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 베팅 디스플레이 */}
+      {player.bet > 0 && (
+        <div style={S.betDisplay}>🪙 {player.bet.toLocaleString()}</div>
+      )}
+
+      {/* 아바타 패널 */}
+      <div style={{
+        ...S.avatarBox, 
+        borderColor: isActive ? "#D4A574" : isMe ? "#10B981" : "rgba(255,255,255,0.1)", 
+        animation: isActive ? "activeTurnPulse 1.5s infinite" : "none"
+      }}>
+        {/* 딜러 버튼 */}
+        {isDealer && <div style={S.dealerButton}>D</div>}
+        
+        <div style={S.avatarName}>
+          {player.nickname} {isMe && <span style={{color: "#10B981"}}>(ME)</span>}
+        </div>
+        <div style={S.avatarChips}>$ {player.chips.toLocaleString()}</div>
+        
+        {folded && <div style={S.statusTag}>FOLD</div>}
+        {player.allIn && <div style={{...S.statusTag, background:"#DC2626"}}>ALL-IN</div>}
+      </div>
     </div>
   );
 }
 
 function ShowdownResult({ table, userId }) {
   const active = table.players.filter(p => !p.folded);
-  const results = active.map(p => ({
-    player: p,
-    hand: evaluateHand([...p.cards, ...table.communityCards]),
-  })).sort((a, b) => b.hand.rank - a.hand.rank);
-  
-  const winner = results[0];
-  const won = winner && winner.player.userId === userId;
+  const results = active.map(p => ({ 
+    player: p, 
+    hand: evaluateHand([...p.cards, ...table.communityCards]) 
+  })).sort((a,b) => b.hand.rank - a.hand.rank);
+  const won = results[0]?.player.userId === userId;
   
   return (
-    <div style={{
-      ...S.showdownBox,
-      background: won 
-        ? "linear-gradient(135deg, rgba(16,185,129,0.3), rgba(5,150,105,0.1))" 
-        : "linear-gradient(135deg, rgba(100,100,100,0.3), rgba(50,50,50,0.1))",
-    }}>
-      <div style={S.showdownTitle}>
-        {won ? "🏆 YOU WIN!" : `🏆 ${winner?.player.nickname} 승리!`}
+    <div>
+      <h2 style={{
+        color: won ? "#10B981" : "#D4A574", 
+        margin: "0 0 10px 0", 
+        fontSize: 20,
+        textAlign: "center",
+        letterSpacing: 2,
+      }}>
+        {won ? "🏆 WINNER!" : `🏆 ${results[0]?.player.nickname} WINS`}
+      </h2>
+      <div style={{background:"rgba(0,0,0,0.5)", padding:12, borderRadius:10}}>
+        {results.map((r, i) => (
+          <div key={i} style={{
+            display:"flex", justifyContent:"space-between", 
+            padding:"6px 0", 
+            borderBottom: i < results.length - 1 ? "1px solid rgba(255,255,255,0.1)" : "none", 
+            fontSize:12,
+          }}>
+            <span>{r.player.nickname}</span>
+            <span style={{color: i===0 ? "#FDE047" : "#aaa", fontWeight: i===0 ? 900 : 400}}>
+              {r.hand.name}
+            </span>
+          </div>
+        ))}
       </div>
-      {results.map((r, i) => (
-        <div key={i} style={S.showdownRow}>
-          <span>{r.player.nickname}</span>
-          <span style={{color: i === 0 ? "#FFD700" : "#aaa"}}>{r.hand.name}</span>
-        </div>
-      ))}
     </div>
   );
 }
 
-function getPhaseName(phase) {
-  return {
-    waiting: "대기",
-    preflop: "프리플랍",
-    flop: "플랍",
-    turn: "턴",
-    river: "리버",
-    showdown: "쇼다운",
-    ended: "종료",
-  }[phase] || phase;
-}
-
+// -----------------------------------------------------
+// 스타일 (모바일 우선)
+// -----------------------------------------------------
 const S = {
-  container: { padding: 12, color: "#fff", background: "#0a0a0a", minHeight: "100vh", boxSizing: "border-box" },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  backBtn: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "6px 12px", borderRadius: 16, cursor: "pointer", fontSize: 11, fontWeight: 700 },
-  title: { margin: 0, fontSize: 15, fontWeight: 900, color: "#D4A574", maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  phaseBadge: { background: "rgba(212,165,116,0.2)", color: "#D4A574", padding: "4px 10px", borderRadius: 10, fontSize: 10, fontWeight: 800, letterSpacing: 1 },
-  
-  loading: { padding: 40, textAlign: "center", color: "#D4A574", fontSize: 14 },
-  error: { background: "rgba(239,68,68,0.15)", border: "1px solid #EF4444", color: "#FCA5A5", padding: "8px 12px", borderRadius: 8, fontSize: 11, marginBottom: 10 },
-  
-  tableArea: { marginBottom: 12 },
-  tableFelt: {
-    background: "radial-gradient(ellipse at center, #1a4f36 0%, #061c12 100%)",
-    border: "3px solid #D4A574", borderRadius: 24, padding: "16px 12px",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.8), inset 0 0 40px rgba(0,0,0,0.5)",
-    minHeight: 400,
+  loadingScreen: { 
+    display: "flex", justifyContent: "center", alignItems: "center", 
+    height: "100vh", background: "#050A10", 
+    color: "#D4A574", fontSize: 16, fontWeight: 900, letterSpacing: 4,
   },
-  centerArea: { textAlign: "center", marginBottom: 14 },
-  potBox: {
-    display: "inline-block", padding: "6px 20px",
-    background: "linear-gradient(135deg, rgba(255,215,0,0.2), rgba(212,165,116,0.1))",
-    border: "1px solid rgba(255,215,0,0.5)", borderRadius: 10, marginBottom: 10,
-  },
-  potLabel: { fontSize: 9, color: "#FFD700", letterSpacing: 2, fontWeight: 800 },
-  potValue: { fontSize: 18, fontWeight: 900, color: "#FFD700" },
-  communityCards: { display: "flex", gap: 4, justifyContent: "center", marginBottom: 8 },
-  betInfo: { fontSize: 11, color: "rgba(255,255,255,0.6)", fontWeight: 700 },
-  
-  card: {
-    width: 44, height: 60, borderRadius: 6,
-    display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
-  },
-  cardRank: { fontSize: 14, fontWeight: 900, lineHeight: 1 },
-  cardSuit: { fontSize: 16, lineHeight: 1 },
-  
-  playersGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 8,
-  },
-  playerSeat: {
-    padding: 8, borderRadius: 10, transition: "all 0.3s",
-  },
-  playerHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
-  playerName: { fontSize: 11, fontWeight: 800, color: "#fff" },
-  dealerChip: { background: "#FFD700", color: "#000", fontSize: 9, fontWeight: 900, padding: "2px 6px", borderRadius: 10 },
-  playerCards: { display: "flex", gap: 3, marginBottom: 4 },
-  cardBack: {
-    width: 28, height: 38,
-    background: "linear-gradient(135deg, #4A1033, #1A0512)",
-    border: "1px solid #D4A574", borderRadius: 4,
-  },
-  miniCard: {
-    width: 28, height: 38, background: "#fff",
-    borderRadius: 4, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-  },
-  noCards: { fontSize: 20, color: "rgba(255,255,255,0.2)" },
-  playerStats: { display: "flex", flexWrap: "wrap", gap: 4, fontSize: 9 },
-  chipsLabel: { color: "#FFD700", fontWeight: 800 },
-  betLabel: { color: "#D4A574", fontWeight: 700 },
-  allInLabel: { color: "#EF4444", fontWeight: 900, background: "rgba(239,68,68,0.2)", padding: "1px 5px", borderRadius: 4 },
-  foldedLabel: { color: "#6B7280", fontWeight: 700 },
-  
-  actionArea: { background: "rgba(0,0,0,0.3)", borderRadius: 12, padding: 12 },
-  waitingMsg: { textAlign: "center", color: "rgba(255,255,255,0.6)", fontSize: 12, marginBottom: 10, fontWeight: 700 },
-  startBtn: {
-    width: "100%", padding: 14,
-    background: "linear-gradient(135deg, #10B981, #059669)",
-    border: "none", color: "#fff", borderRadius: 10,
-    fontSize: 14, fontWeight: 900, cursor: "pointer", letterSpacing: 2,
+  container: { 
+    display: "flex", flexDirection: "column", 
+    minHeight: "100vh", 
+    background: "radial-gradient(circle at 50% -20%, #1a2a3a 0%, #030712 100%)", 
+    fontFamily: "'Inter', sans-serif", color: "#fff", 
   },
   
-  yourTurnBadge: {
-    textAlign: "center", padding: 8, marginBottom: 10,
-    background: "linear-gradient(135deg, rgba(255,215,0,0.3), rgba(212,165,116,0.2))",
-    border: "1px solid #FFD700", borderRadius: 8,
-    color: "#FFD700", fontWeight: 900, fontSize: 13, letterSpacing: 1,
+  topBar: { 
+    display: "flex", justifyContent: "space-between", alignItems: "center", 
+    padding: "12px 16px", 
+    background: "linear-gradient(180deg, rgba(0,0,0,0.6), transparent)", 
+    zIndex: 100,
   },
-  waitingTurnMsg: {
-    textAlign: "center", padding: 10,
-    background: "rgba(255,255,255,0.05)", borderRadius: 8,
-    color: "rgba(255,255,255,0.5)", fontSize: 12, fontWeight: 700,
+  backBtn: { 
+    background: "rgba(255,255,255,0.08)", 
+    border: "1px solid rgba(255,255,255,0.2)", 
+    padding: "6px 12px", borderRadius: 20, 
+    color: "#fff", fontSize: 10, fontWeight: 800, 
+    cursor: "pointer", backdropFilter: "blur(4px)",
   },
-  actionButtons: { display: "flex", gap: 6, marginBottom: 8 },
-  actBtn: {
-    flex: 1, padding: "10px 8px", border: "none", color: "#fff",
-    borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 900, letterSpacing: 1,
+  tableTitle: { 
+    fontSize: 13, fontWeight: 900, letterSpacing: 1, 
+    color: "#fff", display: "flex", flexDirection: "column", alignItems: "center",
+    maxWidth: "50%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
-  raiseRow: { display: "flex", gap: 6 },
-  raiseInput: {
-    width: 90, padding: "8px 10px",
-    background: "rgba(0,0,0,0.4)", border: "1px solid rgba(212,165,116,0.3)",
-    color: "#fff", borderRadius: 6, fontSize: 12, outline: "none",
+  blindText: { 
+    color: "#D4A574", fontWeight: 700, fontSize: 10, letterSpacing: 2, marginTop: 2,
   },
-  
-  showdownBox: {
-    padding: 14, borderRadius: 12, marginBottom: 10,
-    border: "1px solid rgba(212,165,116,0.3)",
+  phaseBadge: { 
+    background: "rgba(212,165,116,0.15)", 
+    border: "1px solid rgba(212,165,116,0.3)", 
+    color: "#D4A574", padding: "4px 10px", borderRadius: 8, 
+    fontSize: 10, fontWeight: 800, letterSpacing: 1,
   },
-  showdownTitle: {
-    fontSize: 16, fontWeight: 900, textAlign: "center",
-    color: "#FFD700", marginBottom: 10, letterSpacing: 2,
-  },
-  showdownRow: {
-    display: "flex", justifyContent: "space-between",
-    padding: "4px 8px", fontSize: 11,
-    borderTop: "1px solid rgba(255,255,255,0.1)",
+
+  errorBanner: {
+    margin: "0 16px 10px",
+    background: "rgba(239,68,68,0.2)", color: "#FCA5A5", 
+    padding: "10px 14px", borderRadius: 8, 
+    border: "1px solid #EF4444", fontWeight: 600, fontSize: 12,
   },
   
-  historyBox: {
-    marginTop: 10, padding: 10,
-    background: "rgba(0,0,0,0.3)", borderRadius: 8,
-    maxHeight: 120, overflowY: "auto",
+  room: { 
+    flex: 1, position: "relative", 
+    display: "flex", justifyContent: "center", alignItems: "center", 
+    padding: "20px 12px", minHeight: 320,
   },
-  historyTitle: { fontSize: 9, color: "rgba(212,165,116,0.6)", letterSpacing: 2, marginBottom: 6, fontWeight: 800 },
-  historyItem: { fontSize: 10, color: "rgba(255,255,255,0.6)", padding: "2px 0" },
+  tableMat: { 
+    width: "100%", maxWidth: 500, 
+    aspectRatio: "1.3/1",   // 더 둥글게 (모바일 친화)
+    background: "radial-gradient(ellipse at center, #0F5132 0%, #062817 100%)", 
+    borderRadius: "50% / 40%", 
+    border: "8px solid #1a1a1a", 
+    boxShadow: "0 20px 50px rgba(0,0,0,0.8), inset 0 0 40px rgba(0,0,0,0.8)", 
+    position: "relative",
+  },
+  tableInnerRing: { 
+    position: "absolute", 
+    top: "8%", left: "4%", right: "4%", bottom: "8%", 
+    border: "1px solid rgba(212,165,116,0.2)", 
+    borderRadius: "50% / 40%", 
+    display: "flex", justifyContent: "center", alignItems: "center",
+  },
+  
+  centerArea: { 
+    display: "flex", flexDirection: "column", alignItems: "center", 
+    zIndex: 1,
+  },
+  mainPot: { 
+    background: "rgba(0,0,0,0.7)", 
+    border: "1px solid rgba(253,224,71,0.3)", 
+    padding: "6px 18px", borderRadius: 16, 
+    textAlign: "center", marginBottom: 12, 
+    boxShadow: "0 6px 16px rgba(0,0,0,0.5)",
+  },
+  potLabel: { fontSize: 8, color: "rgba(255,255,255,0.6)", letterSpacing: 2, fontWeight: 700 },
+  potValue: { 
+    fontSize: 18, fontWeight: 900, color: "#FDE047", 
+    animation: "potGlow 2s infinite",
+  },
+  communityBoard: { 
+    display: "flex", gap: 4, 
+    background: "rgba(0,0,0,0.3)", padding: 8, borderRadius: 10,
+  },
+  cardOutline: { 
+    width: 44, height: 64, 
+    border: "2px dashed rgba(255,255,255,0.1)", borderRadius: 6,
+  },
+  currentBetInfo: {
+    marginTop: 8, fontSize: 10, color: "rgba(255,255,255,0.6)",
+    fontWeight: 700, letterSpacing: 1,
+  },
+  
+  seatContainer: { 
+    position: "absolute", 
+    transformOrigin: "center center",
+  },
+  avatarBox: { 
+    background: "linear-gradient(180deg, #1F2937, #111827)", 
+    border: "2px solid", 
+    padding: "6px 10px", borderRadius: 10, 
+    minWidth: 70, textAlign: "center", 
+    boxShadow: "0 6px 16px rgba(0,0,0,0.5)", 
+    position: "relative", zIndex: 10,
+  },
+  avatarName: { 
+    fontSize: 10, fontWeight: 800, color: "#fff", 
+    marginBottom: 2, whiteSpace: "nowrap", 
+    textOverflow: "ellipsis", overflow: "hidden", maxWidth: 90,
+  },
+  avatarChips: { fontSize: 11, fontWeight: 900, color: "#FDE047" },
+  statusTag: { 
+    position: "absolute", bottom: -8, left: "50%", 
+    transform: "translateX(-50%)", 
+    background: "#4B5563", fontSize: 8, fontWeight: 900, 
+    padding: "2px 6px", borderRadius: 4, letterSpacing: 1,
+  },
+  dealerButton: { 
+    background: "#fff", color: "#000", 
+    width: 18, height: 18, borderRadius: "50%", 
+    display: "flex", justifyContent: "center", alignItems: "center", 
+    fontSize: 10, fontWeight: 900, 
+    boxShadow: "0 2px 6px rgba(0,0,0,0.5)", 
+    position: "absolute", right: -8, top: -8, zIndex: 2,
+  },
+  betDisplay: { 
+    background: "rgba(0,0,0,0.85)", 
+    border: "1px solid rgba(212,165,116,0.5)", 
+    color: "#FDE047", padding: "3px 10px", borderRadius: 10, 
+    fontSize: 10, fontWeight: 800, 
+    display: "flex", alignItems: "center", gap: 4, 
+    marginBottom: 4,
+    boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+  },
+  holeCardsWrap: { 
+    display: "flex", marginBottom: 2, 
+    position: "relative",
+    paddingLeft: 10,  // 겹침 보정
+  },
+  cardBody: { 
+    background: "#fff", borderRadius: 4, 
+    display: "flex", flexDirection: "column", 
+    justifyContent: "center", alignItems: "center", 
+    boxShadow: "0 2px 6px rgba(0,0,0,0.6)",
+  },
+  cardBack: { 
+    width: 32, height: 46, 
+    background: "repeating-linear-gradient(45deg, #7F1D1D, #7F1D1D 5px, #991B1B 5px, #991B1B 10px)", 
+    border: "1px solid #fff", borderRadius: 4, 
+    boxShadow: "0 2px 6px rgba(0,0,0,0.6)",
+  },
+
+  hud: { 
+    background: "linear-gradient(180deg, transparent, #030712 20%)", 
+    padding: "16px", zIndex: 100, 
+    minHeight: 140,
+  },
+  centerBox: { textAlign: "center" },
+  waitingText: { 
+    color: "rgba(255,255,255,0.6)", marginBottom: 12, 
+    fontSize: 12,
+  },
+  startBtn: { 
+    background: "linear-gradient(135deg, #D4A574, #B07D46)", 
+    border: "none", padding: "14px 32px", borderRadius: 25, 
+    color: "#000", fontSize: 13, fontWeight: 900, 
+    letterSpacing: 2, cursor: "pointer", 
+    boxShadow: "0 8px 16px rgba(0,0,0,0.5)",
+  },
+  
+  showdownPanel: { 
+    background: "rgba(30,41,59,0.95)", 
+    border: "1px solid #D4A574", padding: 16, borderRadius: 14, 
+    textAlign: "center", maxWidth: 400, margin: "0 auto",
+    boxShadow: "0 16px 32px rgba(0,0,0,0.8)",
+  },
+  nextRoundBtn: { 
+    width: "100%", padding: 12, marginTop: 12, 
+    background: "linear-gradient(135deg, #D4A574, #B07D46)", 
+    border: "none", color: "#000", borderRadius: 10, 
+    fontWeight: 900, cursor: "pointer", letterSpacing: 1, fontSize: 13,
+  },
+  
+  actionPanel: {},
+  waitingTurnText: { 
+    textAlign: "center", 
+    background: "rgba(0,0,0,0.5)", padding: 16, borderRadius: 12, 
+    fontSize: 13, color: "rgba(255,255,255,0.5)", 
+    border: "1px dashed rgba(255,255,255,0.1)",
+  },
+  myControls: { display: "flex", flexDirection: "column", gap: 10 },
+  raiseArea: { 
+    background: "rgba(0,0,0,0.6)", padding: 12, borderRadius: 10, 
+    border: "1px solid rgba(255,255,255,0.1)",
+  },
+  raiseHeader: { 
+    display: "flex", justifyContent: "space-between", 
+    alignItems: "center", fontSize: 11, fontWeight: 700, marginBottom: 8,
+    flexWrap: "wrap", gap: 6,
+  },
+  raiseValue: { color: "#D4A574", fontSize: 14 },
+  quickBtnGroup: { display: "flex", gap: 4 },
+  quickBtn: { 
+    background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", 
+    padding: "4px 8px", borderRadius: 4, fontSize: 9, fontWeight: 800, cursor: "pointer",
+  },
+  buttonGroup: { display: "flex", gap: 8 },
+  actionBtn: { 
+    flex: 1, padding: "14px 8px", border: "none", borderRadius: 10, 
+    color: "#fff", fontSize: 13, fontWeight: 900, 
+    cursor: "pointer", 
+    boxShadow: "0 6px 12px rgba(0,0,0,0.4)", 
+    textShadow: "0 2px 4px rgba(0,0,0,0.5)",
+    letterSpacing: 1,
+  },
 };
