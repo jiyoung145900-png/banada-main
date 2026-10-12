@@ -230,64 +230,44 @@ export const EventService = {
     return { round: currentRound, timeLeft, isDrawingPhase: timeLeft <= 5 };
   },
 
+  // ★ [보안 재설계] game_history 에서만 결과 읽기 (서버 단일 소스)
+  //   - 유저 조작 불가능 (localStorage 조작 큐 제거)
+  //   - 로컬 계산 불가능 (generateResult 제거)
+  //   - Cloud Function 이 game_history 저장하면 유저는 그걸 읽기만
   getFixedResult: async (round) => {
     try {
-      // 로컬 조작 큐 먼저 확인 (관리자 연동 유지)
-      const queue = JSON.parse(localStorage.getItem("event_manipulation_queue") || "{}");
-      if (queue[round]) {
-        return queue[round].map(name => ITEM_CONFIG.find(i => i.name === name)).filter(Boolean);
-      }
-
-      // ★★★ [수정] getDoc → getDocFromServer
-      // getDoc은 Firestore 캐시를 먼저 확인해서 관리자가 나중에 예약해도
-      // 유저 브라우저가 이미 "없음"을 캐시했으면 옛 값을 리턴해버림.
-      // getDocFromServer는 항상 서버에서 최신 값을 가져오므로 예약이 확실히 반영됨.
-      const docRef = doc(db, "event_manipulation", String(round));
+      const docRef = doc(db, "game_history", String(round));
       const docSnap = await getDocFromServer(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const targetNames = data.winner || data.items;
+        const targetNames = data.winner || data.winners;
         if (!targetNames || targetNames.length === 0) return null;
         return targetNames.map(name => ITEM_CONFIG.find(i => i.name === name)).filter(Boolean);
       }
     } catch (e) { 
-      console.error("Result Fetch Error:", e);
-      // ★ getDocFromServer 실패 시(오프라인 등) 캐시로 fallback
+      console.error("game_history 조회 실패:", e);
+      // 네트워크 실패 시 캐시 fallback
       try {
-        const docRef = doc(db, "event_manipulation", String(round));
+        const docRef = doc(db, "game_history", String(round));
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          const targetNames = data.winner || data.items;
+          const targetNames = data.winner || data.winners;
           if (!targetNames || targetNames.length === 0) return null;
           return targetNames.map(name => ITEM_CONFIG.find(i => i.name === name)).filter(Boolean);
         }
       } catch (fallbackErr) {
-        console.error("Fallback getDoc도 실패:", fallbackErr);
+        console.error("Fallback getDoc 실패:", fallbackErr);
       }
     }
     return null;
   },
 
-  generateResult: (round) => {
-    const getLuckScore = (name) => {
-      let hash = 0;
-      const combined = round.toString() + name + "daisy-secret";
-      for (let i = 0; i < combined.length; i++) {
-        hash = (hash << 5) - hash + combined.charCodeAt(i);
-        hash |= 0;
-      }
-      return Math.abs(Math.sin(hash * 0.123456 + round) * 10000) % 100;
-    };
-    const scoredItems = ITEM_CONFIG.map(item => ({
-      ...item,
-      luckScore: getLuckScore(item.name)
-    }));
-    const shuffled = scoredItems.sort((a, b) => b.luckScore - a.luckScore);
-    return shuffled.slice(0, 2).map(({luckScore, ...rest}) => rest); 
-  },
+  // ★ [제거됨] generateResult - 유저가 로컬에서 결과 계산하는 보안 취약점
+  //   이제 Cloud Function 만 결과 생성, 클라이언트는 game_history 읽기만
 
-  // ✅ [수정] 최대 100회까지 백필 + Promise.all 병렬 조회 (기존: 30회 제한 + 순차 조회)
+  // ★ [보안 재설계] game_history 에서만 결과 읽기
+  //   서버에 아직 결과 없는 라운드는 skip (유저가 임의 계산 못 함)
   getMissedHistory: async (lastRound, currentRound, maxCount = 100) => {
     const start = Math.max(lastRound + 1, currentRound - maxCount);
     const rounds = [];
@@ -297,16 +277,16 @@ export const EventService = {
     const results = await Promise.all(
       rounds.map(async (r) => {
         const fixed = await EventService.getFixedResult(r);
-        const winItems = fixed || EventService.generateResult(r);
+        if (!fixed) return null; // ★ 서버에 결과 없으면 skip
         const timeAtRound = new Date(CONFIG.START_TIME + (r - CONFIG.BASE_ROUND) * CONFIG.ROUND_DURATION * 1000);
         return {
           round: r,
-          winItems: winItems.map(i => `${i.icon} ${i.name}`),
+          winItems: fixed.map(i => `${i.icon} ${i.name}`),
           date: timeAtRound.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
         };
       })
     );
-    return results; // 오름차순 (과거 → 최신)
+    return results.filter(Boolean); // null 제거
   },
 
   calculateStats: (history) => {
