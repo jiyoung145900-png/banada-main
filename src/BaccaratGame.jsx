@@ -436,7 +436,9 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
   const totalMainBet = mainBets.player + mainBets.tie + mainBets.banker;
   const totalSideBet = sideBets.playerPair + sideBets.bankerPair + sideBets.perfectPair;
   const totalBet = totalMainBet + totalSideBet;
-  const canPlay = points >= totalBet && totalMainBet > 0 && phase === "betting";
+  // ★ [수정] 이제 points 는 베팅 즉시 차감된 상태이므로 추가 체크 불필요
+  //   메인 베팅이 있고 betting phase 면 DEAL 가능
+  const canPlay = totalMainBet > 0 && phase === "betting";
   
   const audioCtxRef = useRef(null);
   useEffect(() => {
@@ -480,10 +482,14 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   // 선택한 칩을 어느 베팅 자리에 놓을지 결정합니다.
+  // ★ [수정] 베팅 시 즉시 포인트 차감 (뒤로가기 시 공짜 베팅 방지)
   const placeChip = (target) => {
     if (phase !== "betting" || !betStacks[target]) return;
-    if (points < totalBet + selectedChip) return;
+    if (points < selectedChip) return;
 
+    // ★ 즉시 차감 → Firestore 에도 반영됨 → 뒤로가기 해도 돈 빠진 상태
+    onPointsChange(points - selectedChip);
+    
     setBetStacks(prev => ({
       ...prev,
       [target]: [...prev[target], selectedChip],
@@ -492,6 +498,10 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
 
   const clearBets = () => {
     if (phase !== "betting") return;
+    // ★ [수정] 베팅 취소 시 포인트 환불
+    if (totalBet > 0) {
+      onPointsChange(points + totalBet);
+    }
     setBetStacks({ player: [], tie: [], banker: [], playerPair: [], bankerPair: [], perfectPair: [] });
   };
 
@@ -662,9 +672,11 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
     const net = totalPayout - totalBet;
     const won = net > 0;
 
-    // 구경 모드면 돈 계산 X, 히스토리/로드맵만 추가
-    if (!spectatorMode.current) {
-      onPointsChange(points - totalBet + totalPayout);
+    // ★ [수정] 베팅 시 이미 차감했으므로 payout 만 추가
+    //   placeChip 시 즉시 차감 → 뒤로가기 해도 돈 빠진 상태 유지
+    //   여기서는 당첨 금액만 더해주면 됨
+    if (!spectatorMode.current && totalPayout > 0) {
+      onPointsChange(points + totalPayout);
     }
     
     setResult({ ...game, winner, won, payout: totalPayout, net, sideResults,
@@ -824,10 +836,31 @@ export default function BaccaratGame({ points = 100000, onPointsChange = () => {
   };
   const dealerMessage = getDealerMessage();
 
+  // ★ [신규] 안전한 뒤로가기 - 베팅 중이면 환불 후 나가기
+  const handleBack = () => {
+    // 베팅 중 (betting phase) 이고 베팅 금액 있으면 → 환불
+    if (phase === "betting" && totalBet > 0) {
+      if (window.confirm("베팅 중입니다. 나가시면 베팅 금액이 환불됩니다. 로비로 돌아가시겠습니까?")) {
+        onPointsChange(points + totalBet);
+        onBack();
+      }
+      return;
+    }
+    // dealing/squeezing 중에는 뒤로가기 못 하게 (결과 봐야 함)
+    if (phase === "dealing" || phase === "squeezing") {
+      if (window.confirm("게임 진행 중입니다. 지금 나가시면 결과를 볼 수 없고 베팅 금액은 돌아오지 않습니다. 그래도 나가시겠습니까?")) {
+        onBack();
+      }
+      return;
+    }
+    // 그 외 (result phase 등) 는 그냥 나가기
+    onBack();
+  };
+
   return (
     <div style={S.container}>
       <div style={S.header}>
-        <button onClick={onBack} style={S.backBtn}>← LOBBY</button>
+        <button onClick={handleBack} style={S.backBtn}>← LOBBY</button>
         <h2 style={S.title}>VIP BACCARAT</h2>
         <div style={S.points}>💎 {points.toLocaleString()}</div>
       </div>
