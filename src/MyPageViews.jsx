@@ -511,7 +511,7 @@ export const SettingsView = ({ onBack, isKo, isJa, onChangeView, telegramLink  }
       <div style={myStyles.settingItem} onClick={() => onChangeView("profile")}>
         <span style={myStyles.settingText}>{isKo ? "로그인 비밀번호 변경" : isJa ? "ログインパスワード変更" : "Change Password"}</span><span style={myStyles.arrow}>❯</span>
       </div>
-      <div style={myStyles.settingItem} onClick={() => window.open(telegramLink || 'https://t.me/BANADA_support', '_blank')}>
+      <div style={myStyles.settingItem} onClick={() => window.open(telegramLink || 'https://t.me/banadamarketing', '_blank')}>
         <span style={myStyles.settingText}>{isKo ? "1:1 실시간 상담" : isJa ? "1:1リアルタイム相談" : "1:1 Support"}</span><span style={myStyles.arrow}>❯</span>
       </div>
     </div>
