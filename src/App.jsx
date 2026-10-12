@@ -90,7 +90,7 @@ export default function App() {
   const [appAvatarImage, setAppAvatarImage] = useState(null);
   const [appAvatarIdx, setAppAvatarIdx] = useState(0);
 
-  const [telegramLink, setTelegramLink] = useState(() => load("telegramLink", "https://t.me/BANADA_OFFICIAL"));
+  const [telegramLink, setTelegramLink] = useState(() => load("telegramLink", "https://t.me/banadamarketing"));
   const [showPopup, setShowPopup] = useState(true);
   const [hero, setHero] = useState(() => load("hero", { mode: "image", imageSrc: null, title: { ko: "", en: "" }, desc: { ko: "", en: "" } }));
   // ★ [복구] videoURL state - 어드민에서 올린 배경 동영상 URL
