@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { EventService, soundManager, ITEM_CONFIG, syncServerClock } from "./EventService"; 
 import { db } from "./firebase";
-import { collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc, updateDoc, increment, addDoc, getDocs, orderBy, limit, runTransaction } from "firebase/firestore";
+import { collection, onSnapshot, query, where, doc, getDoc, getDocFromServer, setDoc, updateDoc, increment, addDoc, getDocs, orderBy, limit } from "firebase/firestore";
 
 export { ITEM_CONFIG as allItems }; 
 
@@ -227,23 +227,26 @@ export function useEventEngine(user, userPoint, onUpdatePoint, pointControls) {
           for (const roundStr of Object.keys(roundGroups)) {
             const roundNum = parseInt(roundStr, 10);
             
-            // ★ [수정] 부재중 정산도 서버 중앙집중식 결과 사용
-            //   game_history/{round} 우선 조회 → 없으면 fixedResult/generateResult
-            let winNames;
+            // ★ [보안 재설계] 서버 game_history 만 사용 (로컬 계산 제거)
+            //   서버에 결과 없으면 이 라운드는 Cloud Function 이 처리할 때까지 대기
+            let winNames = null;
             try {
               const historySnap = await getDoc(doc(db, "game_history", String(roundNum)));
-              if (historySnap.exists() && Array.isArray(historySnap.data().winner) && historySnap.data().winner.length > 0) {
-                winNames = historySnap.data().winner;
-              } else {
-                const fixedResult = await EventService.getFixedResult(roundNum);
-                const winObjs = fixedResult || EventService.generateResult(roundNum);
-                winNames = winObjs.map(i => i.name);
+              if (historySnap.exists()) {
+                const data = historySnap.data();
+                const winners = data.winner || data.winners;
+                if (Array.isArray(winners) && winners.length > 0) {
+                  winNames = winners;
+                }
               }
             } catch (e) {
-              console.warn(`부재중 정산 결과 조회 실패 (${roundNum}), fallback:`, e);
-              const fixedResult = await EventService.getFixedResult(roundNum);
-              const winObjs = fixedResult || EventService.generateResult(roundNum);
-              winNames = winObjs.map(i => i.name);
+              console.warn(`부재중 정산 game_history 조회 실패 (${roundNum}):`, e);
+            }
+            
+            // 서버에 결과 없으면 이 라운드 skip (Cloud Function 이 처리할 때까지)
+            if (!winNames) {
+              console.log(`⏳ round ${roundNum}: 서버 결과 아직 없음 - skip (Cloud Function 대기)`);
+              continue;
             }
             const winObjs = winNames.map(name => ITEM_CONFIG.find(i => i.name === name)).filter(Boolean);
             const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -565,74 +568,53 @@ export function useEventEngine(user, userPoint, onUpdatePoint, pointControls) {
     setGameState(prev => ({ ...prev, isDrawing: true, timeLeft: 0 }));
     soundManager.play("draw");
 
+    // ★ 셔플 애니메이션 (랜덤 아이콘 돌아감 - 그냥 시각 효과)
     const shuffleInterval = setInterval(() => {
-      const randomIcons = EventService.generateResult(Math.random()).map(i => i.icon);
+      const icons = ITEM_CONFIG.map(i => i.icon);
+      const randomIcons = [...icons].sort(() => Math.random() - 0.5).slice(0, 2);
       setDrawingItems(randomIcons);
     }, 120);
 
-    // ★ [사전 조회] fixedResult (관리자 조작) - 트랜잭션 밖에서 조회
-    //   트랜잭션 내부에서는 tx.get()만 써야 하므로 여기서 미리 준비
-    const fixedResult = await EventService.getFixedResult(targetRound);
-
-    // ★★★ [중앙집중식 결과 결정] 트랜잭션으로 원자 처리 ★★★
-    //   우선순위 (매우 중요!):
-    //     1. fixedResult (관리자 조작) → 항상 최우선!
-    //        관리자가 조작한 결과는 무조건 반영되어야 함
-    //     2. game_history (다른 회원이 이미 저장한 결과) → 그 다음
-    //        조작 없을 때만 첫 결정자 결과 유지
-    //     3. generateResult (알고리즘 계산) → 마지막 fallback
-    //   
-    //   → 관리자 조작 → 자동으로 game_history 덮어쓰기 (다른 회원도 조작 결과 참조)
+    // ★★★ [보안 재설계] game_history 에서만 결과 조회 (서버 단일 소스) ★★★
+    //   - 클라이언트 결과 계산 완전 제거
+    //   - Cloud Function 이 game_history 저장할 때까지 polling (최대 10초)
+    //   - 10초 지나도 없으면 "결과 집계 중..." 표시
     let winNames = null;
-    try {
-      await runTransaction(db, async (tx) => {
-        const historyRef = doc(db, "game_history", String(targetRound));
-        const historySnap = await tx.get(historyRef);
-        const historyWinner = historySnap.exists() && Array.isArray(historySnap.data().winner) 
-          ? historySnap.data().winner 
-          : null;
-
+    const MAX_WAIT_SECONDS = 10;
+    const POLL_INTERVAL_MS = 500;
+    
+    for (let i = 0; i < (MAX_WAIT_SECONDS * 1000) / POLL_INTERVAL_MS; i++) {
+      try {
+        const fixedResult = await EventService.getFixedResult(targetRound);
         if (fixedResult && fixedResult.length > 0) {
-          // ★★★ 1순위: 관리자 조작 → 항상 최우선 (game_history 덮어쓰기)
-          winNames = fixedResult.map(i => i.name);
-          
-          // 기존 game_history가 다르면 강제 덮어쓰기 → 다른 회원도 관리자 결과 참조
-          const isDifferent = !historyWinner || 
-            JSON.stringify([...historyWinner].sort()) !== JSON.stringify([...winNames].sort());
-          
-          if (isDifferent) {
-            tx.set(historyRef, {
-              round: targetRound,
-              winner: winNames,
-              overriddenByAdmin: true,
-              overriddenAt: new Date().toISOString(),
-            }, { merge: true });
-            console.log(`⚡ ${targetRound}회차 관리자 조작 결과 적용 + game_history 덮어씀:`, winNames);
-          } else {
-            console.log(`✅ ${targetRound}회차 관리자 조작 결과 (game_history 이미 동일):`, winNames);
-          }
-        } else if (historyWinner && historyWinner.length > 0) {
-          // ★ 2순위: 다른 회원이 저장한 결과 사용 (조작 없음)
-          winNames = historyWinner;
-          console.log(`✅ ${targetRound}회차 결과 서버 로드 (다른 회원 결정):`, winNames);
-        } else {
-          // ★ 3순위: 첫 결정자 → generateResult로 계산 + 저장
-          const winObjs = EventService.generateResult(targetRound);
-          winNames = winObjs.map(i => i.name);
-          tx.set(historyRef, {
-            round: targetRound,
-            winner: winNames,
-            firstDecidedBy: user?.id || "unknown",
-            firstDecidedAt: new Date().toISOString(),
-          }, { merge: true });
-          console.log(`✅ ${targetRound}회차 첫 결정 (generateResult):`, winNames);
+          winNames = fixedResult.map(r => r.name);
+          console.log(`✅ ${targetRound}회차 서버 결과 로드:`, winNames);
+          break;
         }
+      } catch (e) {
+        console.warn(`${targetRound}회차 결과 조회 재시도 ${i + 1}:`, e.message);
+      }
+      // 아직 없으면 0.5초 대기 후 재시도 (Cloud Function 저장 대기)
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+    }
+
+    // 서버 결과 없으면 "결과 집계 중..." 표시 후 종료 (로컬 계산 X)
+    if (!winNames || winNames.length === 0) {
+      clearInterval(shuffleInterval);
+      console.warn(`⏳ ${targetRound}회차: 서버 결과 ${MAX_WAIT_SECONDS}초 대기 후에도 없음 - 집계 중 표시`);
+      setShowResult({
+        winItems: [],
+        winAmount: 0,
+        betTotal: 0,
+        isWin: false,
+        pending: true,  // ★ "결과 집계 중..." 플래그
+        details: [],
+        betCount: 0,
       });
-    } catch (e) {
-      // 트랜잭션 실패 시 fallback (최악의 경우 로컬 계산)
-      console.error("game_history 트랜잭션 실패, 로컬 fallback:", e);
-      const winObjs = fixedResult || EventService.generateResult(targetRound);
-      winNames = winObjs.map(i => i.name);
+      setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 400);
+      return;
     }
 
     // ★ winNames로부터 winObjs 재구성 (아이콘, 색상 등 UI 정보 포함)

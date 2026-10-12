@@ -687,13 +687,31 @@ return (
                 animate={{ scale: [0.6, 1.15, 1] }}
                 transition={{ duration: 0.45, delay: 0.1 }}
               >
-                {showResult.isWin
+                {showResult.pending
+                  ? tr("⏳ 결과 집계 중...", "⏳ 集計中...", "⏳ Settling...")
+                  : showResult.isWin
                   ? tr("🎉 당첨 성공!", "🎉 当選成功!", "🎉 YOU WIN!")
                   : tr("😢 아쉬워요", "😢 残念...", "😢 YOU LOSE")}
               </motion.div>
+              
+              {showResult.pending && (
+                <div style={{
+                  textAlign: 'center',
+                  padding: '20px',
+                  fontSize: '14px',
+                  color: '#aaa',
+                  lineHeight: 1.6,
+                }}>
+                  {tr(
+                    "서버 결과 집계 중입니다.\n잠시 후 자동으로 반영됩니다.",
+                    "サーバー結果集計中。\nしばらくお待ちください。",
+                    "Settling on server.\nResult will appear shortly."
+                  ).split('\n').map((line, i) => <div key={i}>{line}</div>)}
+                </div>
+              )}
 
               <div style={{fontSize: '50px', margin: '20px 0', display: 'flex', justifyContent: 'center', gap: '12px', alignItems: 'center'}}>
-                {showResult.winItems.map((str, i) => {
+                {!showResult.pending && showResult.winItems.map((str, i) => {
                   const parts = str.split(" ");
                   const iconPart = parts[0];
                   const namePart = parts.slice(1).join(" ");
