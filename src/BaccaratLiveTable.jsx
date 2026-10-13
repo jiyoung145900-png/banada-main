@@ -270,7 +270,10 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const { table, loading } = useBaccaratTable(tableId);
   const round = table?.currentRound || 1;
   const phase = table?.phase || "betting";
-  const players = table?.players || [];
+  // 접속이 끊긴(하트비트 30초 이상) 플레이어는 목록에서 제외 → 담당/딜러 계산이 막히지 않음
+  const players = (table?.players || []).filter(
+    (u) => (table?.playerSeen?.[u] || 0) >= serverNowMs() - 30000
+  );
   const multi = players.length > 1;
   const names = table?.names || {};
   const roundBets = useRoundBets(tableId, round);
@@ -386,8 +389,16 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     }
     return arr;
   };
-  const pStates = cardStates("p");
-  const bStates = cardStates("b");
+  const lastCards = table?.lastResult;
+  const fresh = !!lastCards && serverNowMs() - (table?.lastActionAt || 0) < 6000;
+  const pStates = phase === "dealing" ? cardStates("p")
+    : fresh ? lastCards.playerCards.map(() => "revealed")
+    : ["empty", "empty", "empty"];
+  const bStates = phase === "dealing" ? cardStates("b")
+    : fresh ? lastCards.bankerCards.map(() => "revealed")
+    : ["empty", "empty", "empty"];
+  const pVals = phase === "dealing" ? revealV.p : (fresh ? lastCards.playerCards : []);
+  const bVals = phase === "dealing" ? revealV.b : (fresh ? lastCards.bankerCards : []);
 
   // 자동 내추럴 공개 (딜링 끝나면 누구나 한 번 호출 → 서버가 내추럴일 때만 공개)
   const naturalSent = useRef(0);
@@ -514,6 +525,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   // 드래그 쪼기: 잡고 좌우로 끌면 모서리가 같이 들림. 60% 이상 끌거나 가볍게 누르면 한 단계 공개
   const DRAG_FULL_PX = 120;
   const onDragStart = (side, idx) => (e) => {
+    if (phase !== "dealing") { showToast("카드는 딜러가 DEAL 한 뒤에 열 수 있어요"); return; }
     if (!canSqueeze(side)) {
       const o = side === "p" ? ownerP : ownerB;
       showToast(o ? `${names[o] || "상대"} 님이 까는 쪽입니다` : "지금은 쪼갤 수 없습니다");
@@ -659,7 +671,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
             {phase === "dealing" && <div style={S.ownerTag}>{ownerLabel("p")}</div>}
             <div style={S.cardsContainer}>
               {pStates.map((st, i) => (
-                <Card3D key={`p${i}`} card={revealV.p[i] || undefined} state={st} fromX={-60}
+                <Card3D key={`p${i}`} card={pVals[i] || undefined} state={st} fromX={-60}
                   dragT={dragTFor("p", i, st)}
                   canDrag={canSqueeze("p") && ["back", "peek1", "peek2", "peek3"].includes(st)}
                   onDragStart={onDragStart("p", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
@@ -674,7 +686,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
             {phase === "dealing" && <div style={S.ownerTag}>{ownerLabel("b")}</div>}
             <div style={S.cardsContainer}>
               {bStates.map((st, i) => (
-                <Card3D key={`b${i}`} card={revealV.b[i] || undefined} state={st} fromX={-230}
+                <Card3D key={`b${i}`} card={bVals[i] || undefined} state={st} fromX={-230}
                   dragT={dragTFor("b", i, st)}
                   canDrag={canSqueeze("b") && ["back", "peek1", "peek2", "peek3"].includes(st)}
                   onDragStart={onDragStart("b", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
