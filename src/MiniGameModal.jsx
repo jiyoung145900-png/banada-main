@@ -13,7 +13,9 @@
 import { useState, useEffect } from "react";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import BaccaratGame from "./BaccaratGame";
+// ★ [변경] 바카라를 라이브 멀티플레이로 교체
+import BaccaratLobby from "./BaccaratLobby";
+import BaccaratLiveTable from "./BaccaratLiveTable";
 import RouletteGame from "./RouletteGame";
 import BlackjackGame from "./BlackjackGame";
 import HoldemLobby from "./HoldemLobby";
@@ -25,9 +27,10 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function MiniGameModal({ isOpen, onClose, currentUser }) {
   const [points, setPoints] = useState(0);
-  // screen: lobby, baccarat, roulette, blackjack, holdem_lobby, holdem_table
+  // screen: lobby, baccarat_lobby, baccarat_table, roulette, blackjack, holdem_lobby, holdem_table
   const [screen, setScreen] = useState("lobby");
   const [currentTableId, setCurrentTableId] = useState(null);
+  const [currentBaccaratTable, setCurrentBaccaratTable] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bonusMsg, setBonusMsg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -94,6 +97,7 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
   const handleClose = () => {
     setScreen("lobby");
     setCurrentTableId(null);
+    setCurrentBaccaratTable(null);
     onClose();
   };
 
@@ -105,6 +109,16 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
   const handleLeaveTable = () => {
     setCurrentTableId(null);
     setScreen("holdem_lobby");
+  };
+
+  // ★ [신규] 바카라 라이브 테이블 입장/퇴장
+  const handleEnterBaccaratTable = (tableId) => {
+    setCurrentBaccaratTable(tableId);
+    setScreen("baccarat_table");
+  };
+  const handleLeaveBaccaratTable = () => {
+    setCurrentBaccaratTable(null);
+    setScreen("baccarat_lobby");
   };
 
   if (!isOpen) return null;
@@ -132,8 +146,25 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
                 userName={currentUser?.nickname || currentUser?.id || "GUEST"}
               />
             )}
-            {screen === "baccarat" && (
-              <BaccaratGame points={points} onPointsChange={handlePointsChange} onBack={() => setScreen("lobby")} />
+            {screen === "baccarat_lobby" && (
+              <BaccaratLobby
+                userId={userId}
+                userName={currentUser?.nickname || currentUser?.id || "GUEST"}
+                gamePoints={points}
+                onPointsChange={handlePointsChange}
+                onEnterTable={handleEnterBaccaratTable}
+                onBack={() => setScreen("lobby")}
+              />
+            )}
+            {screen === "baccarat_table" && currentBaccaratTable && (
+              <BaccaratLiveTable
+                tableId={currentBaccaratTable}
+                userId={userId}
+                userName={currentUser?.nickname || currentUser?.id || "GUEST"}
+                gamePoints={points}
+                onPointsChange={handlePointsChange}
+                onLeave={handleLeaveBaccaratTable}
+              />
             )}
             {screen === "roulette" && (
               <RouletteGame points={points} onPointsChange={handlePointsChange} onBack={() => setScreen("lobby")} />
@@ -170,56 +201,129 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
 
 // ====================== 로비 화면 ======================
 function Lobby({ points, onSelect, userName }) {
+  // 애니메이션 CSS 주입
+  useEffect(() => {
+    if (document.getElementById("mini-game-anims")) return;
+    const style = document.createElement("style");
+    style.id = "mini-game-anims";
+    style.innerHTML = `
+      @keyframes modalPop {
+        0% { opacity: 0; transform: scale(0.85); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+      @keyframes bonusPop {
+        0% { opacity: 0; transform: translate(-50%, -20px) scale(0.8); }
+        100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+      }
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      @keyframes neonPulse {
+        0%, 100% { 
+          text-shadow: 0 0 10px rgba(212,165,116,0.8), 0 0 20px rgba(255,107,157,0.5);
+          filter: brightness(1);
+        }
+        50% { 
+          text-shadow: 0 0 20px rgba(212,165,116,1), 0 0 40px rgba(255,107,157,0.8);
+          filter: brightness(1.2);
+        }
+      }
+      @keyframes cardFloat {
+        0%, 100% { transform: translateY(0px) rotate(0deg); }
+        50% { transform: translateY(-6px) rotate(1deg); }
+      }
+      @keyframes shine {
+        0% { background-position: -200% 50%; }
+        100% { background-position: 200% 50%; }
+      }
+      @keyframes liveBlink {
+        0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(239,68,68,0.8); }
+        50% { opacity: 0.6; box-shadow: 0 0 16px rgba(239,68,68,1); }
+      }
+      @keyframes sparkle {
+        0%, 100% { opacity: 0.2; transform: scale(0.8) rotate(0deg); }
+        50% { opacity: 1; transform: scale(1.2) rotate(180deg); }
+      }
+      .game-card-wrap {
+        transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+      }
+      .game-card-wrap:hover {
+        transform: translateY(-6px) scale(1.02);
+      }
+      .game-card-wrap:hover .card-shine {
+        transform: translateX(100%);
+      }
+      .card-shine {
+        position: absolute;
+        top: 0; left: -100%; width: 50%; height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+        transition: transform 0.8s;
+        pointer-events: none;
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
   return (
     <div style={L.container}>
-      {/* 고급 로고 */}
-      <div style={L.hero}>
-        <div style={L.heroIcon}>✨</div>
-        <h1 style={L.heroTitle}>SECRET LOUNGE</h1>
-        <div style={L.heroSub}>VIP MEMBERS ONLY • REPLAY MODE</div>
+      {/* 떠다니는 반짝임 */}
+      <div style={L.sparkles}>
+        {[...Array(6)].map((_, i) => (
+          <span key={i} style={{
+            ...L.sparkleItem,
+            top: `${10 + Math.random() * 70}%`,
+            left: `${Math.random() * 90}%`,
+            animationDelay: `${i * 0.4}s`,
+            fontSize: `${8 + Math.random() * 8}px`,
+          }}>✦</span>
+        ))}
       </div>
 
-      {/* 유저 카드 */}
+      {/* 럭셔리 로고 */}
+      <div style={L.hero}>
+        <div style={L.heroTopLine}>
+          <span style={L.heroDeco}>◆</span>
+          <span style={L.heroDecoText}>PRIVATE</span>
+          <span style={L.heroDeco}>◆</span>
+        </div>
+        <h1 style={L.heroTitle}>SECRET LOUNGE</h1>
+        <div style={L.heroSub}>— VIP MEMBERS ONLY —</div>
+      </div>
+
+      {/* 유저 카드 (럭셔리 명함 스타일) */}
       <div style={L.userCard}>
-        <div style={L.userLabel}>Welcome back,</div>
+        <div style={L.userCardGlow} />
+        <div style={L.userCardTop}>
+          <div style={L.userLabel}>MEMBER</div>
+          <div style={L.vipTag}>VIP</div>
+        </div>
         <div style={L.userName}>{userName}</div>
-        <div style={L.pointsBig}>💎 {points.toLocaleString()}P</div>
+        <div style={L.userDivider} />
+        <div style={L.pointsRow}>
+          <span style={L.pointsLabel}>CHIP BALANCE</span>
+          <span style={L.pointsBig}>💎 {points.toLocaleString()}</span>
+        </div>
       </div>
 
       {/* 게임 카드 그리드 */}
       <div style={L.gamesGrid}>
-        <GameCard
-          icon="🎴"
-          title="Baccarat"
-          subtitle="바카라"
-          desc="Player vs Banker"
-          color="#E63975"
-          onClick={() => onSelect("baccarat")}
+        {/* ★ 바카라 - 완전 재디자인 */}
+        <PremiumGameCard
+          type="baccarat"
+          onClick={() => onSelect("baccarat_lobby")}
         />
-        <GameCard
-          icon="🎡"
-          title="Roulette"
-          subtitle="룰렛"
-          desc="0 ~ 36"
-          color="#D4A574"
+        <PremiumGameCard
+          type="roulette"
           onClick={() => onSelect("roulette")}
         />
-        <GameCard
-          icon="🃏"
-          title="Blackjack"
-          subtitle="블랙잭"
-          desc="21 Game"
-          color="#FF6B9D"
+        <PremiumGameCard
+          type="blackjack"
           onClick={() => onSelect("blackjack")}
         />
-        <GameCard
-          icon="♠"
-          title="Hold'em"
-          subtitle="홀덤 멀티플레이"
-          desc="2~6 Players"
-          color="#10B981"
+        <PremiumGameCard
+          type="holdem"
           onClick={() => onSelect("holdem_lobby")}
-          badge="NEW"
         />
       </div>
 
@@ -230,40 +334,107 @@ function Lobby({ points, onSelect, userName }) {
           · 실제 다이아와 무관<br />
           · 일일 로그인 보너스 +{DAILY_BONUS.toLocaleString()}P<br />
           · 파산 시 자동으로 {INITIAL_POINTS.toLocaleString()}P 지급<br />
-          · 홀덤은 직원끼리 멀티플레이 가능
+          · 바카라/홀덤 멀티플레이 가능
         </div>
       </div>
     </div>
   );
 }
 
-function GameCard({ icon, title, subtitle, desc, color, onClick, badge }) {
+// ★ [완전 재디자인] 프리미엄 게임 카드
+function PremiumGameCard({ type, onClick }) {
+  const configs = {
+    baccarat: {
+      icon: "♠♥",
+      iconStyle: { fontSize: 38, letterSpacing: -4, display: "inline-block" },
+      title: "BACCARAT",
+      subtitle: "Live Multiplayer",
+      desc: "💰 10K - 1M · Player vs Banker",
+      color: "#E63975",
+      colorRgb: "230,57,117",
+      bgGradient: "linear-gradient(135deg, rgba(230,57,117,0.15) 0%, rgba(74,24,48,0.4) 100%)",
+      badge: "LIVE",
+      badgeStyle: { animation: "liveBlink 1.4s infinite", background: "#EF4444" },
+    },
+    roulette: {
+      icon: "🎡",
+      iconStyle: { fontSize: 36 },
+      title: "ROULETTE",
+      subtitle: "French Classic",
+      desc: "0 ~ 36 · 룰렛",
+      color: "#D4A574",
+      colorRgb: "212,165,116",
+      bgGradient: "linear-gradient(135deg, rgba(212,165,116,0.12) 0%, rgba(74,48,24,0.4) 100%)",
+    },
+    blackjack: {
+      icon: "🂡",
+      iconStyle: { fontSize: 38 },
+      title: "BLACKJACK",
+      subtitle: "21 Challenge",
+      desc: "Hit or Stand · 블랙잭",
+      color: "#FF6B9D",
+      colorRgb: "255,107,157",
+      bgGradient: "linear-gradient(135deg, rgba(255,107,157,0.12) 0%, rgba(74,24,48,0.4) 100%)",
+    },
+    holdem: {
+      icon: "🃏",
+      iconStyle: { fontSize: 36 },
+      title: "HOLD'EM",
+      subtitle: "Texas Multiplayer",
+      desc: "2~6 Players · 홀덤",
+      color: "#10B981",
+      colorRgb: "16,185,129",
+      bgGradient: "linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(24,74,48,0.4) 100%)",
+      badge: "NEW",
+      badgeStyle: { background: "#10B981" },
+    },
+  };
+  const cfg = configs[type];
+
   return (
     <button
       onClick={onClick}
+      className="game-card-wrap"
       style={{
         ...L.gameCard,
-        borderColor: color,
-        background: `linear-gradient(135deg, rgba(255,107,157,0.06), rgba(212,165,116,0.04))`,
-        transition: "all 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
-        position: "relative",
+        border: `1.5px solid rgba(${cfg.colorRgb}, 0.4)`,
+        background: cfg.bgGradient,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "translateY(-4px) scale(1.03)";
-        e.currentTarget.style.boxShadow = `0 15px 35px ${color}44`;
+        e.currentTarget.style.borderColor = cfg.color;
+        e.currentTarget.style.boxShadow = `0 20px 50px rgba(${cfg.colorRgb}, 0.35), inset 0 1px 0 rgba(255,255,255,0.1)`;
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.borderColor = `rgba(${cfg.colorRgb}, 0.4)`;
         e.currentTarget.style.boxShadow = "none";
       }}
     >
-      <div style={{ ...L.gameIcon, color }}>{icon}</div>
-      <div style={{ ...L.gameTitle, color }}>{title}</div>
-      <div style={L.gameSubtitle}>{subtitle}</div>
-      <div style={L.gameDesc}>{desc}</div>
-      {badge && (
-        <div style={{...L.badge, background: color}}>
-          {badge}
+      {/* Shine 효과 */}
+      <div className="card-shine" />
+      
+      {/* 아이콘 영역 */}
+      <div style={{
+        ...L.gameIconBox,
+        background: `radial-gradient(circle at center, rgba(${cfg.colorRgb}, 0.25) 0%, transparent 70%)`,
+      }}>
+        <div style={{ ...cfg.iconStyle, color: cfg.color, filter: `drop-shadow(0 0 12px rgba(${cfg.colorRgb}, 0.6))` }}>
+          {cfg.icon}
+        </div>
+      </div>
+      
+      {/* 텍스트 영역 */}
+      <div style={L.gameInfo}>
+        <div style={{ ...L.gameTitle, color: cfg.color }}>
+          {cfg.title}
+        </div>
+        <div style={L.gameSubtitle}>{cfg.subtitle}</div>
+        <div style={L.gameDesc}>{cfg.desc}</div>
+      </div>
+      
+      {/* 배지 */}
+      {cfg.badge && (
+        <div style={{ ...L.badge, ...cfg.badgeStyle }}>
+          {cfg.badge}
         </div>
       )}
     </button>
@@ -332,70 +503,190 @@ const S = {
 };
 
 const L = {
-  container: { padding: 28, color: "#fff" },
-  hero: { textAlign: "center", marginBottom: 32, paddingTop: 24 },
-  heroIcon: { fontSize: 42, marginBottom: 10, filter: "drop-shadow(0 0 20px rgba(255,107,157,0.6))" },
+  container: { padding: 28, color: "#fff", position: "relative", overflow: "hidden" },
+  
+  // 떠다니는 반짝임
+  sparkles: { 
+    position: "absolute", inset: 0, pointerEvents: "none", 
+    overflow: "hidden", zIndex: 1,
+  },
+  sparkleItem: {
+    position: "absolute",
+    color: "#D4A574",
+    opacity: 0.4,
+    animation: "sparkle 3s ease-in-out infinite",
+    textShadow: "0 0 10px rgba(212,165,116,0.8)",
+  },
+  
+  // Hero 섹션
+  hero: { 
+    textAlign: "center", marginBottom: 28, paddingTop: 20, 
+    position: "relative", zIndex: 2,
+  },
+  heroTopLine: {
+    display: "flex", justifyContent: "center", alignItems: "center",
+    gap: 12, marginBottom: 10,
+  },
+  heroDeco: {
+    color: "rgba(212,165,116,0.6)",
+    fontSize: 10,
+  },
+  heroDecoText: {
+    fontSize: 10,
+    letterSpacing: 6,
+    color: "rgba(212,165,116,0.8)",
+    fontWeight: 700,
+  },
   heroTitle: {
     fontSize: 32,
     fontWeight: 900,
     letterSpacing: 6,
     margin: 0,
-    background: "linear-gradient(135deg, #D4A574, #FF6B9D, #D4A574)",
+    background: "linear-gradient(90deg, #D4A574 0%, #FFF4E0 25%, #FF6B9D 50%, #FFF4E0 75%, #D4A574 100%)",
+    backgroundSize: "200% auto",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
     fontFamily: "'Playfair Display', serif",
+    animation: "shine 4s linear infinite, neonPulse 3s ease-in-out infinite",
   },
-  heroSub: { fontSize: 12, color: "rgba(212,165,116,0.75)", letterSpacing: 5, marginTop: 6 },
+  heroSub: { 
+    fontSize: 11, color: "rgba(212,165,116,0.65)", 
+    letterSpacing: 4, marginTop: 8,
+    fontFamily: "'Cormorant Garamond', serif",
+    fontStyle: "italic",
+  },
+  
+  // 유저 카드 (럭셔리 명함)
   userCard: {
-    background: "linear-gradient(135deg, #3d1028, #1f0817)",
-    border: "1px solid rgba(212,165,116,0.5)",
-    borderRadius: 20,
-    padding: 24,
-    textAlign: "center",
-    marginBottom: 28,
+    position: "relative",
+    background: "linear-gradient(135deg, #2a0d1f 0%, #1f0817 50%, #120410 100%)",
+    border: "1px solid rgba(212,165,116,0.4)",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    overflow: "hidden",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",
+    zIndex: 2,
   },
-  userLabel: { fontSize: 11, color: "rgba(255,255,255,0.6)", letterSpacing: 2 },
-  userName: { fontSize: 22, fontWeight: 700, color: "#D4A574", margin: "6px 0 14px" },
+  userCardGlow: {
+    position: "absolute",
+    top: -50, right: -50,
+    width: 150, height: 150,
+    background: "radial-gradient(circle, rgba(212,165,116,0.15) 0%, transparent 70%)",
+    pointerEvents: "none",
+  },
+  userCardTop: {
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    marginBottom: 10,
+  },
+  userLabel: { 
+    fontSize: 10, color: "rgba(255,255,255,0.5)", 
+    letterSpacing: 3, fontWeight: 700,
+  },
+  vipTag: {
+    fontSize: 9, fontWeight: 900, letterSpacing: 2,
+    color: "#000",
+    background: "linear-gradient(135deg, #D4A574, #F0D4B8)",
+    padding: "3px 10px", borderRadius: 4,
+    boxShadow: "0 2px 8px rgba(212,165,116,0.4)",
+  },
+  userName: { 
+    fontSize: 20, fontWeight: 700, color: "#F0D4B8", 
+    margin: "4px 0 12px",
+    fontFamily: "'Playfair Display', serif",
+    letterSpacing: 0.5,
+  },
+  userDivider: {
+    height: 1,
+    background: "linear-gradient(90deg, transparent, rgba(212,165,116,0.4), transparent)",
+    margin: "12px 0",
+  },
+  pointsRow: {
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+  },
+  pointsLabel: {
+    fontSize: 9, color: "rgba(255,255,255,0.45)", 
+    letterSpacing: 2, fontWeight: 600,
+  },
   pointsBig: {
-    fontSize: 36,
+    fontSize: 24,
     fontWeight: 900,
     background: "linear-gradient(135deg, #D4A574, #FF6B9D)",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
+    letterSpacing: 1,
   },
-  gamesGrid: { display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 },
+  
+  // 게임 그리드
+  gamesGrid: { 
+    display: "flex", flexDirection: "column", gap: 12, 
+    marginBottom: 24, position: "relative", zIndex: 2,
+  },
   gameCard: {
-    padding: 22,
-    border: "2px solid",
-    borderRadius: 18,
+    position: "relative",
+    padding: 0,
+    borderRadius: 14,
     cursor: "pointer",
     display: "flex",
-    alignItems: "center",
-    gap: 18,
+    alignItems: "stretch",
+    overflow: "hidden",
     textAlign: "left",
+    minHeight: 82,
   },
-  gameIcon: { fontSize: 42 },
-  gameTitle: { fontSize: 19, fontWeight: 800, fontFamily: "'Playfair Display', serif" },
-  gameSubtitle: { fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 600 },
-  gameDesc: { fontSize: 11, color: "rgba(255,255,255,0.5)", marginLeft: "auto" },
+  gameIconBox: {
+    width: 80,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRight: "1px solid rgba(255,255,255,0.08)",
+  },
+  gameInfo: {
+    flex: 1,
+    padding: "16px 18px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    gap: 2,
+  },
+  gameTitle: { 
+    fontSize: 17, fontWeight: 900, 
+    fontFamily: "'Playfair Display', serif",
+    letterSpacing: 1.5,
+  },
+  gameSubtitle: { 
+    fontSize: 11, color: "rgba(255,255,255,0.7)", 
+    fontWeight: 600, letterSpacing: 0.5,
+  },
+  gameDesc: { 
+    fontSize: 10, color: "rgba(255,255,255,0.45)", 
+    marginTop: 2,
+  },
   badge: {
     position: "absolute",
-    top: -8,
-    right: -8,
+    top: 10, right: 12,
     color: "#fff",
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: 900,
-    padding: "4px 10px",
-    borderRadius: 12,
-    letterSpacing: 1,
-    boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+    padding: "3px 8px",
+    borderRadius: 4,
+    letterSpacing: 1.5,
+    boxShadow: "0 3px 8px rgba(0,0,0,0.4)",
   },
+  
+  // 안내
   notice: {
-    padding: 18,
-    background: "rgba(212,165,116,0.07)",
-    borderRadius: 14,
-    border: "1px dashed rgba(212,165,116,0.3)",
+    padding: 16,
+    background: "rgba(212,165,116,0.05)",
+    borderRadius: 12,
+    border: "1px dashed rgba(212,165,116,0.25)",
+    position: "relative",
+    zIndex: 2,
   },
-  noticeTitle: { color: "#D4A574", fontWeight: 700, marginBottom: 8, fontSize: 13 },
-  noticeText: { color: "rgba(255,255,255,0.65)", lineHeight: 1.85, fontSize: 12 },
+  noticeTitle: { 
+    color: "#D4A574", fontWeight: 700, 
+    marginBottom: 8, fontSize: 12, letterSpacing: 1,
+  },
+  noticeText: { 
+    color: "rgba(255,255,255,0.6)", lineHeight: 1.85, fontSize: 11,
+  },
 };
