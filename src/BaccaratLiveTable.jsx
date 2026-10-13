@@ -47,8 +47,20 @@ const injectKeyframes = () => {
   style.id = "baccarat-animations";
   style.innerHTML = `
     @keyframes dealIn {
-      0% { transform: translateY(-200px) translateX(50px) rotate(-15deg); opacity: 0; }
-      100% { transform: translateY(0) translateX(0) rotate(0deg); opacity: 1; }
+      0% { 
+        transform: translate(-280px, -120px) rotate(-25deg); 
+        opacity: 0; 
+      }
+      30% {
+        opacity: 1;
+      }
+      70% { 
+        transform: translate(5px, 5px) rotate(2deg); 
+      }
+      100% { 
+        transform: translate(0, 0) rotate(0deg); 
+        opacity: 1; 
+      }
     }
     @keyframes bannerSlide {
       0% { opacity: 0; transform: translateY(-20px) scale(0.9); }
@@ -61,6 +73,20 @@ const injectKeyframes = () => {
     @keyframes confettiFall {
       0% { transform: translateY(-30px) rotate(0deg); opacity: 1; }
       100% { transform: translateY(600px) rotate(720deg); opacity: 0; }
+    }
+    /* ★ 슈통 애니메이션 */
+    @keyframes shoeShake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-2px) rotate(-1deg); }
+      75% { transform: translateX(2px) rotate(1deg); }
+    }
+    @keyframes shoeGlow {
+      0%, 100% { 
+        box-shadow: 0 0 15px rgba(212,165,116,0.3), inset 0 2px 4px rgba(0,0,0,0.6); 
+      }
+      50% { 
+        box-shadow: 0 0 25px rgba(212,165,116,0.7), inset 0 2px 4px rgba(0,0,0,0.6); 
+      }
     }
   `;
   document.head.appendChild(style);
@@ -511,13 +537,13 @@ export default function BaccaratLiveTable({
     };
   }, [tableId, userId]);
   
-  // ★ [라이브] 서버에서 결과 수신 → 카드 공개 애니메이션
+  // ★ [라이브] 서버에서 결과 수신 → 슈통에서 순차 딜링 애니메이션
   useEffect(() => {
     if (!serverLastResult || !serverLastResultRound) return;
     if (serverLastResultRound <= processedRoundRef.current) return;
     processedRoundRef.current = serverLastResultRound;
     
-    // 서버 결과를 gameData 형태로 변환
+    // 서버 결과를 gameData 로 저장 (전체 카드 포함 - 최대 각 3장)
     const data = {
       player: serverLastResult.playerCards || [],
       banker: serverLastResult.bankerCards || [],
@@ -527,16 +553,52 @@ export default function BaccaratLiveTable({
       sideResults: serverLastResult.sideResults || {},
     };
     setGameData(data);
+    thirdCardAddedRef.current = false;
     
-    // 카드 상태: 모두 back (뒷면) → 쪼기 가능
-    const pStates = Array(data.player.length).fill("back");
-    const bStates = Array(data.banker.length).fill("back");
-    setPCards(pStates);
-    setBCards(bStates);
-    
-    setPhase("squeezing");
-    playSound("deal");
-    speakDealer("Cards are dealt. Please reveal.");
+    // ★ 슈통에서 순차 딜링 애니메이션 (P1 → B1 → P2 → B2)
+    (async () => {
+      setPhase("dealing");
+      setPCards(["empty", "empty"]);
+      setBCards(["empty", "empty"]);
+      speakDealer("Dealing");
+      
+      // 1장씩 슈통에서 뽑기
+      await sleep(400);
+      playSound("deal");
+      setPCards(prev => { const n = [...prev]; n[0] = "back"; return n; });
+      
+      await sleep(500);
+      playSound("deal");
+      setBCards(prev => { const n = [...prev]; n[0] = "back"; return n; });
+      
+      await sleep(500);
+      playSound("deal");
+      setPCards(prev => { const n = [...prev]; n[1] = "back"; return n; });
+      
+      await sleep(500);
+      playSound("deal");
+      setBCards(prev => { const n = [...prev]; n[1] = "back"; return n; });
+      
+      await sleep(300);
+      
+      // ★ Natural (8 or 9) 체크 - 자동으로 뒤집기
+      const pNatural = data.pScore >= 8 && data.player.length === 2;
+      const bNatural = data.bScore >= 8 && data.banker.length === 2;
+      
+      if (pNatural || bNatural) {
+        // Natural - 자동 공개
+        speakDealer("Natural!");
+        await sleep(400);
+        setPCards(["revealed", "revealed"]);
+        setBCards(["revealed", "revealed"]);
+        playSound("reveal");
+        setPhase("squeezing");  // squeezing phase 로 (자동으로 finalize 됨)
+      } else {
+        // 일반 - 유저가 쪼기
+        setPhase("squeezing");
+        speakDealer("Please squeeze your cards");
+      }
+    })();
   }, [serverLastResult, serverLastResultRound]);
   
   // ★ [라이브] 내 베팅 정산 결과 수신 → 결과 처리
@@ -1070,6 +1132,22 @@ export default function BaccaratLiveTable({
 
       {/* 게임 테이블 */}
       <div style={S.tableArea}>
+        {/* ★ 슈통 (SHOE) - 카드 뽑는 곳 */}
+        <div style={{
+          ...S.shoe,
+          animation: phase === "dealing" ? "shoeShake 0.5s ease-in-out infinite" : "none",
+        }}>
+          <div style={S.shoeLabel}>SHOE</div>
+          <div style={S.shoeBox}>
+            <div style={S.shoeCards}>
+              <div style={S.shoeCard} />
+              <div style={{...S.shoeCard, marginTop: -46}} />
+              <div style={{...S.shoeCard, marginTop: -46}} />
+            </div>
+            <div style={S.shoeDeckCount}>6 DECKS</div>
+          </div>
+        </div>
+        
         <div style={S.tableFelt}>
           <div style={S.playerSide}>
             <div style={S.sideTitle}>PLAYER</div>
@@ -1393,6 +1471,64 @@ const S = {
 
   tableArea: { position: "relative", marginBottom: 20 },
   tableFelt: { background: "radial-gradient(ellipse at top, #1a4f36 0%, #061c12 100%)", borderRadius: 24, border: "4px solid #D4A574", padding: "30px 10px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 20px 50px rgba(0,0,0,0.8), inset 0 0 60px rgba(0,0,0,0.5)", minHeight: 220 },
+  
+  // ★ 슈통 (SHOE) 스타일
+  shoe: {
+    position: "absolute",
+    top: -14,
+    left: 20,
+    zIndex: 20,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+  },
+  shoeLabel: {
+    fontSize: 8,
+    letterSpacing: 2,
+    color: "#D4A574",
+    fontWeight: 900,
+    textShadow: "0 2px 4px rgba(0,0,0,0.6)",
+  },
+  shoeBox: {
+    position: "relative",
+    width: 54,
+    height: 70,
+    background: "linear-gradient(135deg, #4a2818, #2a1810)",
+    border: "2px solid #D4A574",
+    borderRadius: "6px 6px 10px 10px",
+    boxShadow: "0 6px 15px rgba(0,0,0,0.5), inset 0 2px 4px rgba(0,0,0,0.6)",
+    animation: "shoeGlow 3s ease-in-out infinite",
+    padding: "8px 6px 4px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  shoeCards: {
+    position: "relative",
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  shoeCard: {
+    width: 36,
+    height: 48,
+    background: "linear-gradient(135deg, #8B0000, #5a0000)",
+    border: "1.5px solid #D4A574",
+    borderRadius: 3,
+    position: "relative",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.5)",
+  },
+  shoeDeckCount: {
+    fontSize: 6,
+    color: "rgba(212,165,116,0.9)",
+    fontWeight: 900,
+    letterSpacing: 1,
+    fontFamily: "'Courier New', monospace",
+    marginTop: 2,
+  },
 
   playerSide: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center" },
   bankerSide: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center" },
