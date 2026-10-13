@@ -1,8 +1,9 @@
 // ===================================================================
-// 🎰 BANADA VIP BACCARAT · LIVE v3
+// 🎰 BANADA VIP BACCARAT · LIVE v4
 // ===================================================================
-// 서버(table 문서)가 진행 상태의 원천 → 모든 플레이어가 같은 화면.
-// 딜러 = 이번 라운드 최다 베팅자 (서버가 최종 판단).
+// 혼자: 베팅 확정 → 바로 시작 / 여러 명: 모두 확정하면 시작 (20초 뒤 자동)
+// 카드는 자리(PLAYER/BANKER)별 최다 베팅자가 잡고 끌어서 깝니다.
+// 모든 진행 상태는 서버(table 문서)가 원천 → 모든 플레이어가 같은 화면.
 // ===================================================================
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
@@ -11,8 +12,8 @@ import BaccaratRoadmap, { computeStats } from "./BaccaratRoadmap";
 import { speak, setVoiceEnabled, setBgmEnabled, startBGM, stopBGM } from "./BaccaratSound";
 import {
   useBaccaratTable, useRoundBets, useBaccaratHistory, useMyBet,
-  joinBaccaratTable, heartbeatBaccarat, leaveBaccaratTable,
-  placeBaccaratBet, dealBaccarat, peekBaccarat, naturalBaccarat, revealSideBaccarat,
+  setBaccaratUser, joinBaccaratTable, heartbeatBaccarat, leaveBaccaratTable,
+  placeBaccaratBet, startBaccarat, peekBaccarat, naturalBaccarat, revealMineBaccarat,
   serverNowMs, MIN_BET, MAX_BET,
 } from "./BaccaratFirestore";
 
@@ -239,67 +240,47 @@ function BetBox({ label, sub, color, stack, onClick, disabled, compact }) {
 }
 
 
+
 // ====================================================================
-// 메인 컴포넌트 v3 - 서버 상태를 그대로 그림 (모든 플레이어 동일 화면)
+// 메인 컴포넌트 v4
+//   혼자: 베팅 확정 → 바로 시작 / 여러 명: 모두 확정하면 시작(20초 뒤 자동)
+//   카드는 자리별 담당(최다 베팅자)이 잡고 끌어서 까고, '모두 열기' 로 한 번에 열 수도 있음
 // ====================================================================
 const NATURAL_WAIT = 2000;
 const LEVEL_STATE = ["back", "peek1", "peek2", "peek3", "revealed"];
 const AREA_KEYS = ["player", "banker", "tie", "playerPair", "bankerPair", "perfectPair"];
-
-// 서버와 동일한 딜러 규칙 (표시용)
-function dealerInfo(table, now) {
-  const bets = table.roundBets || {};
-  const order = table.betOrder || {};
-  const present = table.players || [];
-  const cands = Object.keys(bets)
-    .filter((u) => bets[u] > 0 && present.includes(u))
-    .sort((a, b) => bets[b] - bets[a] || (order[a] || 0) - (order[b] || 0));
-  if (!cands.length) return { cands, status: "none" };
-  if (!table.bettingEndsAt) return { cands, status: "open", dealer: cands[0], remain: 0 };
-  if (now < table.bettingEndsAt) return { cands, status: "betting", remain: table.bettingEndsAt - now };
-  const idx = Math.floor((now - table.bettingEndsAt) / 8000);
-  if (idx < cands.length) {
-    return { cands, status: "open", dealer: cands[idx], remain: table.bettingEndsAt + (idx + 1) * 8000 - now, idx };
-  }
-  return { cands, status: "auto" };
-}
+const UNREVEALED_STATES = ["back", "peek1", "peek2", "peek3"];
+const STALE_MS = 30000;
 
 export default function BaccaratLiveTable({ tableId, userId, userName, gamePoints = 0, onLeave = () => {} }) {
+  setBaccaratUser(userId, userName);
   useEffect(() => { injectKeyframes(); }, []);
 
   const { table, loading } = useBaccaratTable(tableId);
   const round = table?.currentRound || 1;
-  // 예전 버전의 phase(waiting/result)도 베팅 가능 상태로 취급
   const phase = table?.phase === "dealing" ? "dealing" : "betting";
-  // 접속이 끊긴(하트비트 30초 이상) 플레이어는 목록에서 제외 → 담당/딜러 계산이 막히지 않음
-  const players = (table?.players || []).filter(
-    (u) => (table?.playerSeen?.[u] || 0) >= serverNowMs() - 30000
-  );
-  const multi = players.length > 1;
   const names = table?.names || {};
-  const roundBets = useRoundBets(tableId, round);
-  const myCommitted = useMyBet(userId, tableId, round);
   const history = useBaccaratHistory(tableId, 80);
   const winners = useMemo(() => history.map((h) => h.winner), [history]);
   const stats = useMemo(() => computeStats(winners), [winners]);
+  const roundBets = useRoundBets(tableId, round);
+  const myCommitted = useMyBet(userId, tableId, round);
 
-  // 시계 (서버 시각 기준으로 500ms 마다 갱신)
+  // 서버 시각 기준 시계
   const [now, setNow] = useState(serverNowMs());
   useEffect(() => {
     const id = setInterval(() => setNow(serverNowMs()), 250);
     return () => clearInterval(id);
   }, []);
 
-  // 입장 / 하트비트 / 퇴장
-  useEffect(() => {
-    if (!tableId || !userId) return;
-    joinBaccaratTable(tableId, userName).catch((e) => console.error("[Baccarat] 입장 실패:", e));
-    const hb = setInterval(() => heartbeatBaccarat(tableId), 10000);
-    return () => { clearInterval(hb); leaveBaccaratTable(tableId); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableId, userId]);
+  // 접속 중인 플레이어 (하트비트 30초 끊기면 제외, 나 자신은 항상 포함)
+  const players = (table?.players || []).filter(
+    (u) => u === userId || (table?.playerSeen?.[u] || 0) >= now - STALE_MS
+  );
+  if (!players.includes(userId)) players.push(userId);
+  const multi = players.length > 1;
 
-  // 로컬 UI 상태
+  // ── 로컬 UI 상태 ──
   const [selectedChip, setSelectedChip] = useState(CHIPS[0]);
   const [desired, setDesired] = useState(emptyStacks);
   const [busy, setBusy] = useState(false);
@@ -308,23 +289,23 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const [voiceOn, setVoiceOn] = useState(true);
   const [bgmOn, setBgmOn] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
-  const [resultShown, setResultShown] = useState(null);
-  const resultInit = useRef(false);
   const toastTimer = useRef(null);
-  useEffect(() => { setDesired(emptyStacks()); }, [round]);
   const audioRef = useRef(null);
+  const resultInit = useRef(false);
+  const lastSeenResult = useRef(0);
 
   const showToast = (m) => {
     setToast(m);
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 2400);
+    toastTimer.current = setTimeout(() => setToast(""), 2600);
   };
 
-  // 사운드
+  // ── 사운드 ──
   const playSound = (type) => {
     try {
       if (!audioRef.current) audioRef.current = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioRef.current;
+      if (ctx.state === "suspended") ctx.resume();
       const t = ctx.currentTime;
       const tone = (f1, f2, s, d, v, wave = "triangle") => {
         const o = ctx.createOscillator(); const g = ctx.createGain();
@@ -343,14 +324,15 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const speakDealer = (text) => { if (voiceOn) speak(text); };
   useEffect(() => { if (bgmOn) startBGM(); else stopBGM(); return () => stopBGM(); }, [bgmOn]);
 
-  // 내 칩(작성 중) 합계 / 서버에 확정된 합계
+  // ── 베팅 집계 ──
   const sum = (a = []) => a.reduce((s, v) => s + v, 0);
   const desiredTotal = AREA_KEYS.reduce((s, k) => s + sum(desired[k]), 0);
-  const committedTotal = myCommitted && !myCommitted.settled ? myCommitted.totalBet || 0 : 0;
   const mainDesired = sum(desired.player) + sum(desired.banker) + sum(desired.tie);
-  const shownPoints = gamePoints - (desiredTotal - committedTotal);
+  const committedTotal = myCommitted && !myCommitted.settled ? myCommitted.totalBet || 0 : 0;
+  // 화면 포인트 = DB 포인트 - (확정 이후 추가로 올려둔 칩). 확정분은 이미 DB 에서 차감됨
+  const shownPoints = gamePoints - Math.max(0, desiredTotal - committedTotal);
 
-  // 다른 플레이어 포함 영역별 합계 (내 작성분 제외한 서버 확정분)
+  // 다른 플레이어가 확정한 영역별 금액
   const serverArea = useMemo(() => {
     const out = {}; AREA_KEYS.forEach((k) => (out[k] = 0));
     roundBets.forEach((b) => {
@@ -359,24 +341,48 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     });
     return out;
   }, [roundBets, userId]);
-  const bettorList = roundBets.map((b) => ({ name: b.nickname || "GUEST", total: b.totalBet || 0, mine: b.userId === userId }));
 
-  // 딜러 상태 (서버 규칙 미러링)
-  const dealer = table ? dealerInfo(table, now) : { status: "none", cands: [] };
-  const amDealer = dealer.status === "open" && dealer.dealer === userId;
-  const amAuto = dealer.status === "auto" && players.includes(userId);
-  const canDeal = phase === "betting" && (amDealer || amAuto);
+  // 확정 안 했지만 칩을 만지는 중인 사람 (시작을 기다리게 만드는 사람)
+  const confirmedMap = table?.roundBets || {};
+  const thinking = Object.keys(table?.engagedSeen || {}).filter(
+    (u) => u !== userId && players.includes(u) && !(confirmedMap[u] > 0)
+  );
+  const endsAt = table?.bettingEndsAt || 0;
+  const secondsLeft = endsAt ? Math.max(0, Math.ceil((endsAt - now) / 1000)) : null;
+  const bettingClosed = !!endsAt && now >= endsAt;
 
-  // ── 딜링 연출: 서버 시각 기준 (모든 화면이 같은 타이밍) ──
+  // ── 입장 / 하트비트 / 퇴장 ──
+  const engagedRef = useRef(false);
+  engagedRef.current = desiredTotal > 0 || committedTotal > 0;
+  useEffect(() => {
+    if (!tableId || !userId) return;
+    joinBaccaratTable(tableId).catch((e) => console.error("[Baccarat] 입장 실패:", e));
+    const hb = setInterval(() => heartbeatBaccarat(tableId, engagedRef.current), 10000);
+    return () => { clearInterval(hb); leaveBaccaratTable(tableId); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId, userId]);
+
+  // 라운드가 바뀌면 작성 중인(미확정) 칩 초기화
+  useEffect(() => { setDesired(emptyStacks()); }, [round]);
+
+  // ── 확정 후 시작 대기: 2.5초마다 시작 요청 (서버가 조건을 판단, 여러 번 불러도 안전) ──
+  const waitingStart = phase === "betting" && committedTotal > 0;
+  useEffect(() => {
+    if (!waitingStart) return;
+    const id = setInterval(() => { startBaccarat(tableId).catch(() => {}); }, 2500);
+    return () => clearInterval(id);
+  }, [waitingStart, tableId, round]);
+
+  // ── 딜링 연출 (서버 시각 기준 → 모든 화면이 같은 타이밍) ──
   const dealAt = table?.deal?.dealAt || 0;
-  const elapsed = phase === "dealing" || phase === "betting" && dealAt ? now - dealAt : 0;
+  const elapsed = phase === "dealing" && dealAt ? now - dealAt : 0;
   const drawn = table?.drawn || { p: 2, b: 2 };
   const peek = table?.peek || { p: [0, 0, 0], b: [0, 0, 0] };
   const revealV = table?.reveal || { p: [null, null, null], b: [null, null, null] };
+
   const shownCount = (side) => {
-    if (phase !== "dealing") return drawn[side];
-    const thresholds = side === "p" ? [500, 1600] : [1050, 2150];
-    const n = elapsed >= thresholds[1] ? 2 : elapsed >= thresholds[0] ? 1 : 0;
+    const th = side === "p" ? [500, 1600] : [1050, 2150];
+    const n = elapsed >= th[1] ? 2 : elapsed >= th[0] ? 1 : 0;
     return Math.min(n, drawn[side]);
   };
   const cardStates = (side) => {
@@ -384,26 +390,24 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     const arr = [];
     for (let i = 0; i < 3; i++) {
       if (i >= drawn[side]) { arr.push("empty"); continue; }
-      if (i >= cnt && i < 2) { arr.push("empty"); continue; }
-      if (i === 2 && phase === "dealing" && peek[side][i] === 0 && drawn[side] === 3) { arr.push("back"); continue; }
+      if (i < 2 && i >= cnt) { arr.push("empty"); continue; }
       arr.push(LEVEL_STATE[peek[side][i] ?? 0]);
     }
     return arr;
   };
-  const lastCards = table?.lastResult;
-  const fresh = !!lastCards && serverNowMs() - (table?.lastActionAt || 0) < 6000;
-  const pStates = phase === "dealing" ? cardStates("p")
-    : fresh ? lastCards.playerCards.map(() => "revealed")
-    : ["empty", "empty", "empty"];
-  const bStates = phase === "dealing" ? cardStates("b")
-    : fresh ? lastCards.bankerCards.map(() => "revealed")
-    : ["empty", "empty", "empty"];
-  const pVals = phase === "dealing" ? revealV.p : (fresh ? lastCards.playerCards : []);
-  const bVals = phase === "dealing" ? revealV.b : (fresh ? lastCards.bankerCards : []);
 
-  // 자동 내추럴 공개 (딜링 끝나면 누구나 한 번 호출 → 서버가 내추럴일 때만 공개)
+  // 라운드가 끝난 직후 6초 동안은 직전 결과 카드를 보여줌 (그 뒤엔 빈 자리)
+  const lastRes = table?.lastResult;
+  const fresh = !!lastRes && now - (table?.lastActionAt || 0) < 6000;
+  const pStates = phase === "dealing" ? cardStates("p") : fresh ? lastRes.playerCards.map(() => "revealed") : ["empty", "empty", "empty"];
+  const bStates = phase === "dealing" ? cardStates("b") : fresh ? lastRes.bankerCards.map(() => "revealed") : ["empty", "empty", "empty"];
+  const pVals = phase === "dealing" ? revealV.p : fresh ? lastRes.playerCards : [];
+  const bVals = phase === "dealing" ? revealV.b : fresh ? lastRes.bankerCards : [];
+  const hasUnrevealed = [...pStates, ...bStates].some((s) => UNREVEALED_STATES.includes(s));
+
+  // 내추럴 자동 공개 (딜링이 끝나면 한 번 요청 → 서버가 내추럴일 때만 공개)
   const naturalSent = useRef(0);
-  const naturalReady = phase === "dealing" && !!dealAt && now - dealAt >= NATURAL_WAIT + 150;
+  const naturalReady = phase === "dealing" && !!dealAt && elapsed >= NATURAL_WAIT + 150;
   useEffect(() => {
     if (!naturalReady || naturalSent.current === dealAt) return;
     naturalSent.current = dealAt;
@@ -411,100 +415,33 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [naturalReady, dealAt]);
 
-  // 연출 사운드 (딜 시점)
-  const lastDealSound = useRef(0);
+  // 딜링 시작 멘트
+  const lastDealVoice = useRef(0);
   useEffect(() => {
-    if (phase === "dealing" && dealAt && lastDealSound.current !== dealAt) {
-      lastDealSound.current = dealAt;
+    if (phase === "dealing" && dealAt && lastDealVoice.current !== dealAt) {
+      lastDealVoice.current = dealAt;
       speakDealer("Dealing");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, dealAt]);
 
-  // 결과 발표: 라운드가 끝나 lastResultRound 가 바뀌면
+  // 결과 발표 (입장 시점의 과거 결과는 무음 처리)
   useEffect(() => {
     const r = table?.lastResultRound;
     if (!r) return;
-    if (!resultInit.current) { resultInit.current = true; setResultShown(r); return; }
-    if (resultShown === r) return;
-    setResultShown(r);
-    if (!table.lastResult) return;
-    const w = table.lastResult.winner;
+    if (!resultInit.current) { resultInit.current = true; lastSeenResult.current = r; return; }
+    if (lastSeenResult.current === r) return;
+    lastSeenResult.current = r;
+    const w = table.lastResult?.winner;
     speakDealer(w === "player" ? "Player wins" : w === "banker" ? "Banker wins" : "Tie");
     playSound("win");
-    if (myCommitted && myCommitted.round === r && myCommitted.net > 0) {
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 3200);
-    }
+    // 내가 이긴 판이면 폭죽: 정산된 내 베팅 기록으로 확인
+    const mine = roundBets.find((b) => b.userId === userId && b.round === r);
+    if (mine && mine.net > 0) { setShowConfetti(true); setTimeout(() => setShowConfetti(false), 3200); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table?.lastResultRound]);
 
-
-  // 칩 조작 (작성 중인 것만 - 확정 전까지 서버에 없음)
-  const canEdit = phase === "betting" && !busy && !(dealer.status === "betting" ? false : dealer.status === "auto" && false);
-  const placeChip = (target) => {
-    if (!canEdit) return;
-    if (desiredTotal + selectedChip > MAX_BET) return showToast(`최대 베팅 ${MAX_BET.toLocaleString()}`);
-    if (shownPoints < selectedChip) return showToast("포인트가 부족합니다");
-    if (table?.bettingEndsAt && now >= table.bettingEndsAt) return showToast("베팅이 마감되었습니다");
-    playSound("chip");
-    setDesired((prev) => ({ ...prev, [target]: [...prev[target], selectedChip] }));
-  };
-  const removeLastChip = () => {
-    // 가장 최근에 놓은 칩 위치는 알 수 없으므로 전체 중 마지막 비어있지 않은 영역에서 제거
-    setDesired((prev) => {
-      const next = { ...prev };
-      for (const k of [...AREA_KEYS].reverse()) if (next[k].length) { next[k] = next[k].slice(0, -1); break; }
-      return next;
-    });
-  };
-  const clearDesired = () => setDesired(emptyStacks());
-
-  // 베팅 확정 (서버가 한도·잔액·마감 검증, 차액만 차감)
-  const confirmBet = async () => {
-    if (busy) return;
-    const bets = {}; AREA_KEYS.forEach((k) => (bets[k] = sum(desired[k])));
-    const total = AREA_KEYS.reduce((s, k) => s + bets[k], 0);
-    if (bets.player + bets.banker + bets.tie <= 0) return showToast("PLAYER / BANKER / TIE 중 한 곳에 베팅하세요");
-    if (total < MIN_BET) return showToast(`최소 베팅 ${MIN_BET.toLocaleString()}`);
-    setBusy(true);
-    try {
-      await placeBaccaratBet({ userId, nickname: userName, tableId, bets });
-      // 혼자 있을 때는 확정과 동시에 바로 딜 (여러 명이면 딜러가 DEAL)
-      if (players.length <= 1 && phase === "betting") {
-        await dealBaccarat(tableId);
-      }
-      showToast(`베팅 확정 · ${total.toLocaleString()}`);
-    } catch (err) {
-      showToast(err.message || "베팅 실패");
-    } finally { setBusy(false); }
-  };
-
-  // DEAL (딜러 권한은 서버가 최종 판단)
-  const deal = async () => {
-    if (busy) return;
-    setBusy(true);
-    try { await dealBaccarat(tableId); }
-    catch (err) { showToast(err.message || "딜 실패"); }
-    finally { setBusy(false); }
-  };
-
-  // 쪼기 (공유): 서버에 한 단계 요청 → 모든 화면에 같이 반영
-  const peekPending = useRef({});
-  const drag = useRef(null);
-  const [dragView, setDragView] = useState(null);
-  const squeeze = async (side, idx) => {
-    if (phase !== "dealing" || elapsed < NATURAL_WAIT) return;
-    const key = `${side}${idx}`;
-    if (peekPending.current[key]) return;
-    peekPending.current[key] = true;
-    playSound("peek");
-    try { await peekBaccarat(tableId, side === "p" ? "player" : "banker", idx); }
-    catch (e) { showToast(e.message || "쪼기 실패"); }
-    finally { peekPending.current[key] = false; }
-  };
-
-  // 자리별 카드 담당 = 그 자리에 가장 많이 건 접속 중 플레이어 (서버와 동일 규칙)
+  // ── 카드 담당 (서버와 같은 규칙: 자리별 최다 베팅자, 없으면 누구나) ──
   const ownerOf = (k) => {
     const own = (table?.areaOwn || {})[k] || {};
     const order = table?.betOrder || {};
@@ -515,25 +452,41 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   };
   const ownerP = ownerOf("p");
   const ownerB = ownerOf("b");
-  const iOwn = (k) => (k === "p" ? ownerP : ownerB) === userId;
+  const squeezeOpen = phase === "dealing" && elapsed >= NATURAL_WAIT;
   const canSqueeze = (side) => {
-    if (phase !== "dealing" || elapsed < NATURAL_WAIT) return false;
-    const owner = side === "p" ? ownerP : ownerB;
-    return owner === userId || (owner === null && players.includes(userId));
+    if (!squeezeOpen) return false;
+    const o = side === "p" ? ownerP : ownerB;
+    return o === userId || o === null;
   };
-  const ownerLabel = (k) => {
-    const o = k === "p" ? ownerP : ownerB;
+  const ownerLabel = (side) => {
+    const o = side === "p" ? ownerP : ownerB;
     if (!o) return "누구나 깔 수 있음";
     return o === userId ? "👉 내가 깝니다" : `🫴 ${names[o] || "플레이어"} 님이 깝니다`;
   };
+  const sideHasUnrevealed = (side) => (side === "p" ? pStates : bStates).some((s) => UNREVEALED_STATES.includes(s));
+  const canRevealMine = squeezeOpen && ((canSqueeze("p") && sideHasUnrevealed("p")) || (canSqueeze("b") && sideHasUnrevealed("b")));
 
-  // 드래그 쪼기: 잡고 좌우로 끌면 모서리가 같이 들림. 60% 이상 끌거나 가볍게 누르면 한 단계 공개
+  // ── 쪼기 (한 단계씩) / 드래그 / 모두 열기 ──
+  const peekPending = useRef({});
+  const drag = useRef(null);
+  const [dragView, setDragView] = useState(null);
   const DRAG_FULL_PX = 120;
+
+  const squeeze = async (side, idx) => {
+    if (!squeezeOpen) return;
+    const key = `${side}${idx}`;
+    if (peekPending.current[key]) return;
+    peekPending.current[key] = true;
+    playSound("peek");
+    try { await peekBaccarat(tableId, side === "p" ? "player" : "banker", idx); }
+    catch (e) { showToast(e.message || "쪼기 실패"); }
+    finally { peekPending.current[key] = false; }
+  };
   const onDragStart = (side, idx) => (e) => {
-    if (phase !== "dealing") { showToast("카드는 딜러가 DEAL 한 뒤에 열 수 있어요"); return; }
+    if (phase !== "dealing") { showToast("베팅이 확정되면 카드가 나옵니다"); return; }
     if (!canSqueeze(side)) {
       const o = side === "p" ? ownerP : ownerB;
-      showToast(o ? `${names[o] || "상대"} 님이 까는 쪽입니다` : "지금은 쪼갤 수 없습니다");
+      showToast(o ? `${names[o] || "상대"} 님이 까는 쪽입니다` : "카드가 나오는 중입니다");
       return;
     }
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
@@ -553,49 +506,99 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     setDragView(null);
     if (!d) return;
     const progress = Math.min(1, Math.abs(d.dx) / DRAG_FULL_PX);
-    const tap = Math.abs(d.dx) < 6;
-    if (progress >= 0.5 || tap) squeeze(d.side, d.idx);
+    if (progress >= 0.5 || Math.abs(d.dx) < 6) squeeze(d.side, d.idx);
   };
-  // 드래그 중인 카드의 진행도 (현재 단계 + 끈 정도) — 뒤집힌 단계부터 이어서
   const dragTFor = (side, idx, state) => {
     const d = dragView;
     if (!d || d.side !== side || d.idx !== idx) return null;
-    const base = LEVEL_OF[state] ?? 0;
-    return base + Math.min(1, Math.abs(d.dx) / DRAG_FULL_PX);
+    return (LEVEL_OF[state] ?? 0) + Math.min(1, Math.abs(d.dx) / DRAG_FULL_PX);
   };
-
-  // 내 쪽 전체 공개 (자기 쪽 소유자만)
-  const revealMySide = async (k) => {
-    if (phase !== "dealing" || elapsed < NATURAL_WAIT) return;
+  const revealMine = async () => {
+    if (!canRevealMine) return;
     playSound("reveal");
-    try { await revealSideBaccarat(tableId, k === "p" ? "player" : "banker"); }
+    try { await revealMineBaccarat(tableId); }
     catch (e) { showToast(e.message || "공개 실패"); }
   };
-  const hasUnrevealed = [...pStates, ...bStates].some((s) => ["back", "peek1", "peek2", "peek3"].includes(s));
-  const mySideOpen = (k) => iOwn(k) && phase === "dealing" && elapsed >= NATURAL_WAIT
-    && (k === "p" ? pStates : bStates).some((s) => ["back", "peek1", "peek2", "peek3"].includes(s));
 
-  // 표시 값
+  // ── 칩 조작 (작성 중인 것만 - 확정 전까지 서버에 없음) ──
+  const placeChip = (target) => {
+    if (phase !== "betting" || busy || bettingClosed) return;
+    if (desiredTotal + selectedChip > MAX_BET) return showToast(`최대 베팅 ${MAX_BET.toLocaleString()}`);
+    if (shownPoints < selectedChip) return showToast("포인트가 부족합니다");
+    playSound("chip");
+    if (desiredTotal === 0 && committedTotal === 0) heartbeatBaccarat(tableId, true); // "칩 만지는 중" 즉시 알림
+    setDesired((prev) => ({ ...prev, [target]: [...prev[target], selectedChip] }));
+  };
+  const removeLastChip = () => {
+    setDesired((prev) => {
+      const next = { ...prev };
+      for (const k of [...AREA_KEYS].reverse()) if (next[k].length) { next[k] = next[k].slice(0, -1); break; }
+      return next;
+    });
+  };
+  const clearDesired = () => {
+    setDesired(emptyStacks());
+    if (committedTotal === 0) heartbeatBaccarat(tableId, false);
+  };
+
+  // ── 베팅 확정: 서버가 한도·잔액·마감 검증 → 곧바로 시작 요청 ──
+  //   혼자이거나 칩 만지는 사람 전원이 확정했으면 서버가 바로 시작, 아니면 기다림
+  const confirmBet = async () => {
+    if (busy) return;
+    const bets = {}; AREA_KEYS.forEach((k) => (bets[k] = sum(desired[k])));
+    const total = AREA_KEYS.reduce((s, k) => s + bets[k], 0);
+    if (bets.player + bets.banker + bets.tie <= 0) return showToast("PLAYER / BANKER / TIE 중 한 곳에 베팅하세요");
+    if (total < MIN_BET) return showToast(`최소 베팅 ${MIN_BET.toLocaleString()}`);
+    setBusy(true);
+    try {
+      await placeBaccaratBet({ tableId, bets });
+    } catch (err) {
+      showToast(err.message || "베팅 실패");
+      setBusy(false);
+      return;
+    }
+    try {
+      const r = await startBaccarat(tableId);
+      if (r && r.waiting) showToast("다른 플레이어의 확정을 기다리는 중...");
+    } catch (e) { /* 2.5초 후 자동 재시도 */ }
+    setBusy(false);
+  };
+
+  // 지금 시작 (자동 시작이 안 됐을 때를 위한 수동 버튼)
+  const startNow = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await startBaccarat(tableId);
+      if (r && r.waiting) showToast(r.reason || "아직 시작할 수 없습니다");
+    } catch (e) { showToast(e.message || "시작 실패"); }
+    setBusy(false);
+  };
+
+  // ── 표시용 값 ──
   const revealedScore = (side) => {
-    const vals = (side === "p" ? [0, 1, 2] : [0, 1, 2]).filter((i) => (table?.peek?.[side]?.[i] ?? 0) === 4 && revealV[side][i]).map((i) => revealV[side][i]);
+    const vals = [0, 1, 2].filter((i) => (peek[side][i] ?? 0) === 4 && revealV[side][i]).map((i) => revealV[side][i]);
     return vals.length ? handScore(vals) : "-";
   };
-  const lastRes = table?.lastResult;
-  const displayP = phase === "result" || (phase === "betting" && lastRes) ? (lastRes ? lastRes.playerValue : "-") : revealedScore("p");
-  const displayB = phase === "result" || (phase === "betting" && lastRes) ? (lastRes ? lastRes.bankerValue : "-") : revealedScore("b");
-  const showResultBanner = phase === "betting" && lastRes && table?.lastResultRound === resultShown && now - (table?.lastActionAt || 0) < 6000;
-
+  const displayP = phase === "dealing" ? revealedScore("p") : fresh ? lastRes.playerValue : "-";
+  const displayB = phase === "dealing" ? revealedScore("b") : fresh ? lastRes.bankerValue : "-";
   const roundLabel = `${tableId === "table1" ? "T1" : "T2"}-#${round}`;
+
   const dealerMessage = (() => {
     if (phase === "dealing") return hasUnrevealed ? "SQUEEZE YOUR CARDS!" : "DEALING...";
-    if (dealer.status === "betting") return "PLACE YOUR BETS";
-    if (dealer.status === "open") return amDealer ? "YOU DEAL!" : `DEALER: ${names[dealer.dealer] || "..."}`;
-    if (dealer.status === "auto") return "ANYONE CAN DEAL";
-    if (phase === "betting" && lastRes) {
-      const w = lastRes.winner === "player" ? "PLAYER" : lastRes.winner === "banker" ? "BANKER" : "TIE";
-      return `${w} WINS`;
-    }
+    if (committedTotal > 0) return thinking.length ? "WAITING FOR OTHERS" : "BET PLACED";
+    if (fresh) return lastRes.winner === "player" ? "PLAYER WINS" : lastRes.winner === "banker" ? "BANKER WINS" : "TIE";
     return "PLACE YOUR BETS";
+  })();
+
+  const statusLine = (() => {
+    if (phase === "dealing") return elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : "🎴 카드를 잡고 좌우로 끌어서 열어보세요";
+    if (committedTotal > 0 && thinking.length) {
+      return `⏳ ${thinking.map((u) => names[u] || "플레이어").join(", ")} 님의 베팅 확정을 기다리는 중${secondsLeft !== null ? ` · ${secondsLeft}초` : ""}`;
+    }
+    if (committedTotal > 0) return "✅ 베팅 확정 · 곧 시작합니다";
+    if (endsAt) return `⏰ 다른 플레이어가 베팅 확정함 · ${secondsLeft}초 안에 베팅하세요`;
+    return multi ? "💭 칩을 놓고 베팅 확정을 누르세요 · 모두 확정하면 바로 시작" : "💭 칩을 놓고 베팅 확정을 누르면 바로 시작합니다";
   })();
 
   if (loading) {
@@ -607,7 +610,8 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     );
   }
 
-  const bettingOpen = phase === "betting" && !(table?.bettingEndsAt && now >= table.bettingEndsAt);
+  const bettingOpen = phase === "betting" && !bettingClosed;
+  const bettorList = roundBets.map((b) => ({ name: b.nickname || "GUEST", total: b.totalBet || 0, mine: b.userId === userId }));
 
   return (
     <div style={S.container}>
@@ -629,17 +633,11 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
       </div>
 
       <BaccaratDealer phase={phase} message={dealerMessage} roundNumber={roundLabel} playerCount={players.length}
-        speaking={phase === "dealing"} noMoreBets={dealer.status === "auto"} />
+        speaking={phase === "dealing"} noMoreBets={bettingClosed} />
 
-      {/* 베팅 타이머 / 딜러 대기 */}
       <div style={S.timerBar}>
-        <div style={{ ...S.timerFill, width: dealer.status === "betting" && table?.bettingEndsAt ? `${Math.max(0, Math.min(100, (dealer.remain / 20000) * 100))}%` : "100%" }} />
-        <div style={S.timerText}>
-          {dealer.status === "betting" && `⏰ 베팅 마감까지 ${Math.ceil(dealer.remain / 1000)}초`}
-          {dealer.status === "open" && `🎴 ${amDealer ? "당신이 딜러입니다 · DEAL 을 누르세요" : `${names[dealer.dealer] || "딜러"} 차례 · ${Math.ceil(dealer.remain / 1000)}초`}`}
-          {dealer.status === "auto" && "🎴 누구나 DEAL 가능"}
-          {dealer.status === "none" && (phase === "dealing" ? "🎴 진행 중" : "💭 베팅을 기다리는 중")}
-        </div>
+        <div style={{ ...S.timerFill, width: phase === "betting" && endsAt ? `${Math.max(0, Math.min(100, ((endsAt - now) / 20000) * 100))}%` : "100%" }} />
+        <div style={S.timerText}>{statusLine}</div>
       </div>
 
       {stats.total > 0 && (
@@ -677,10 +675,9 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
             <div style={S.cardsContainer}>
               {pStates.map((st, i) => (
                 <Card3D key={`p${i}`} card={pVals[i] || undefined} state={st} fromX={-60}
-                  dragT={dragTFor("p", i, st)}
-                  canDrag={canSqueeze("p") && ["back", "peek1", "peek2", "peek3"].includes(st)}
+                  dragT={dragTFor("p", i, st)} canDrag={canSqueeze("p") && UNREVEALED_STATES.includes(st)}
                   onDragStart={onDragStart("p", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
-                  onClick={() => squeeze("p", i)} highlight={!!lastRes && lastRes.winner === "player" && phase === "betting"} />
+                  onClick={() => squeeze("p", i)} highlight={fresh && phase === "betting" && lastRes.winner === "player"} />
               ))}
             </div>
             <div style={S.scoreBox}>{displayP}</div>
@@ -692,17 +689,16 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
             <div style={S.cardsContainer}>
               {bStates.map((st, i) => (
                 <Card3D key={`b${i}`} card={bVals[i] || undefined} state={st} fromX={-230}
-                  dragT={dragTFor("b", i, st)}
-                  canDrag={canSqueeze("b") && ["back", "peek1", "peek2", "peek3"].includes(st)}
+                  dragT={dragTFor("b", i, st)} canDrag={canSqueeze("b") && UNREVEALED_STATES.includes(st)}
                   onDragStart={onDragStart("b", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
-                  onClick={() => squeeze("b", i)} highlight={!!lastRes && lastRes.winner === "banker" && phase === "betting"} />
+                  onClick={() => squeeze("b", i)} highlight={fresh && phase === "betting" && lastRes.winner === "banker"} />
               ))}
             </div>
             <div style={{ ...S.scoreBox, color: "#E63975", borderColor: "rgba(230,57,117,0.3)" }}>{displayB}</div>
           </div>
         </div>
 
-        {showResultBanner && (
+        {fresh && phase === "betting" && (
           <div style={S.resultOverlay}>
             <div style={{ ...S.resultBanner, background: "linear-gradient(90deg, transparent, rgba(0,0,0,0.9), transparent)" }}>
               <div style={S.resultTitle}>{lastRes.winner === "player" ? "PLAYER WINS" : lastRes.winner === "banker" ? "BANKER WINS" : "TIE"}</div>
@@ -711,13 +707,23 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
         )}
       </div>
 
-      {/* 같은 테이블 참가자 베팅 현황 (모두 동일하게 보임) */}
       {bettorList.length > 0 && (
         <div style={S.mySummary}>
           👥 {bettorList.map((b) => `${b.name} ${b.total.toLocaleString()}${b.mine ? " (나)" : ""}`).join(" · ")}
         </div>
       )}
 
+      {/* ── 딜링 중: 모두 열기 ── */}
+      {phase === "dealing" && (
+        <div>
+          {canRevealMine && <button onClick={revealMine} style={S.revealAllBtn}>👁 내 카드 모두 열기 (SKIP)</button>}
+          {!canRevealMine && hasUnrevealed && squeezeOpen && (
+            <div style={S.squeezeGuide}>다른 플레이어가 카드를 열고 있어요 · 모든 화면에 똑같이 보입니다</div>
+          )}
+        </div>
+      )}
+
+      {/* ── 베팅 ── */}
       {phase === "betting" && (
         <div style={S.bettingUI}>
           <div style={S.chipSelector}>
@@ -754,28 +760,17 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           </div>
 
           <button onClick={confirmBet} disabled={busy || !bettingOpen || mainDesired === 0 || desiredTotal === committedTotal}
-            style={{ ...S.actionBtn, marginTop: 8, opacity: busy || mainDesired === 0 || desiredTotal === committedTotal ? 0.5 : 1 }}>
-            {busy ? "⏳ 처리 중..." : committedTotal > 0 && desiredTotal === committedTotal ? "✅ 베팅 확정됨" : committedTotal > 0 ? `✏️ 베팅 수정 (${desiredTotal.toLocaleString()})` : `✅ 베팅 확정 (${desiredTotal.toLocaleString()})`}
+            style={{ ...S.actionBtn, marginTop: 8, opacity: busy || !bettingOpen || mainDesired === 0 || desiredTotal === committedTotal ? 0.5 : 1 }}>
+            {busy ? "⏳ 처리 중..."
+              : committedTotal > 0 && desiredTotal === committedTotal ? "✅ 베팅 확정됨"
+              : committedTotal > 0 ? `✏️ 베팅 수정 (${desiredTotal.toLocaleString()})`
+              : multi ? `✅ 베팅 확정 (${desiredTotal.toLocaleString()})` : `🎲 베팅 확정 · 바로 시작 (${desiredTotal.toLocaleString()})`}
           </button>
 
-          {canDeal && (
-            <button onClick={deal} disabled={busy} style={{ ...S.actionBtn, marginTop: 10, background: "linear-gradient(135deg, #10B981, #059669)", color: "#fff" }}>
-              🎴 DEAL {amDealer ? "(딜러)" : amAuto ? "(누구나)" : ""}
-            </button>
-          )}
-          {!canDeal && multi && dealer.status === "betting" && (
-            <div style={S.infoLine}>💭 베팅 마감 후 가장 많이 건 사람이 딜러가 됩니다</div>
+          {committedTotal > 0 && !busy && (
+            <button onClick={startNow} style={{ ...S.revealAllBtn, marginTop: 8 }}>▶ 지금 시작</button>
           )}
         </div>
-      )}
-
-      {phase === "dealing" && (
-        <div style={S.statusBar}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>{elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : hasUnrevealed ? "카드를 터치해서 열어보세요 👆" : "마무리 중..."}</div>
-        </div>
-      )}
-      {phase === "dealing" && elapsed >= NATURAL_WAIT && hasUnrevealed && !mySideOpen("p") && !mySideOpen("b") && (
-        <div style={S.squeezeGuide}>카드를 잡고 좌우로 끌어서 여세요 (살짝 누르면 한 단계씩 열려요)</div>
       )}
     </div>
   );
