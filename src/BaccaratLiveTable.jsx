@@ -4,7 +4,8 @@
 // 흐름: 입장 → 칩 베팅(즉시 차감) → READY/DEAL → 서버 결과 수신
 //       → 슈통에서 1장씩 딜링 → 쪼기(내추럴이면 자동 공개)
 //       → 서드카드 1장씩 추가 → 결과
-// 포인트: 칩 = 증감(delta) 저장 / 정산 지급 = 서버(Cloud Function)
+// 포인트: 칩은 화면에서만 들고 있다가 READY/DEAL 시 서버가 한도·잔액 검증 후
+//         차감(트랜잭션) → 결과 정산 지급도 서버. 클라이언트는 포인트를 직접 쓰지 않음
 // ===================================================================
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
@@ -19,6 +20,7 @@ import {
   joinBaccaratTable,
   leaveBaccaratTable,
   sendReady,
+  sendHeartbeat,
   MIN_BET,
   MAX_BET,
 } from "./BaccaratFirestore";
@@ -238,8 +240,7 @@ export default function BaccaratLiveTable({
   tableId,
   userId,
   userName,
-  gamePoints = 0,
-  onPointsDelta = () => {}, // 증감 저장 (서버 정산과 충돌 없음)
+  gamePoints = 0, // 서버(DB) 실시간 포인트
   onLeave = () => {},
 }) {
   useEffect(() => { injectKeyframes(); }, []);
@@ -276,6 +277,8 @@ export default function BaccaratLiveTable({
   const [dealerSpeaking, setDealerSpeaking] = useState(false);
   const [showRoadmap, setShowRoadmap] = useState(true);
   const [toast, setToast] = useState("");
+  const [lockedBase, setLockedBase] = useState(null); // 베팅 제출 시점 잔액 (연출 중 표시용)
+  const [waitSeconds, setWaitSeconds] = useState(0);
 
   // ── 내 베팅 (서버 정산 상태) ──
   const myBet = useMyLatestBet(userId, tableId, betRound);
@@ -290,8 +293,6 @@ export default function BaccaratLiveTable({
   // ── refs (stale closure 방지) ──
   const aliveRef = useRef(true);
   const phaseRef = useRef(phase); phaseRef.current = phase;
-  const onPointsDeltaRef = useRef(onPointsDelta); onPointsDeltaRef.current = onPointsDelta;
-  const unsentRef = useRef(0); unsentRef.current = phase === "betting" ? totalBet : 0;
   const totalBetRef = useRef(0); totalBetRef.current = totalBet;
   const totalMainBetRef = useRef(0); totalMainBetRef.current = totalMainBet;
   const voiceRef = useRef(true); voiceRef.current = voiceOn;
@@ -303,7 +304,6 @@ export default function BaccaratLiveTable({
   const initRef = useRef(false);
   const processedRoundRef = useRef(0);
   const mySubmittedRoundRef = useRef(0);
-  const betSavedRoundRef = useRef(0);
   const sendingRef = useRef(false);
   const thirdLockRef = useRef(false);
   const finalizedRoundRef = useRef(0);
@@ -320,13 +320,13 @@ export default function BaccaratLiveTable({
   const historyWinners = useMemo(() => visibleHistory.map((h) => h.winner), [visibleHistory]);
   const stats = useMemo(() => computeStats(historyWinners), [historyWinners]);
 
-  // ── 서버가 먼저 지급한 정산 포인트는 연출 끝날 때까지 숨김 ──
-  const hiddenPayout =
-    (phase === "waiting_ready" || phase === "dealing" || phase === "squeezing") &&
-    myBet && myBet.round === betRound && myBet.settled
-      ? myBet.payout || 0
-      : 0;
-  const shownPoints = points - hiddenPayout;
+  // ── 표시 포인트 ──
+  // 베팅 전: DB 포인트 - 화면에 올려둔 칩 / 제출 후: 제출 시점 잔액 - 베팅 (+ 결과 공개 후 당첨금)
+  // → 서버가 정산을 먼저 지급해도 카드를 다 열기 전엔 포인트가 먼저 변하지 않음
+  const shownPoints =
+    lockedBase !== null
+      ? lockedBase - totalBet + (phase === "result" && result ? result.payout : 0)
+      : points - (phase === "betting" ? totalBet : 0);
 
   // ────────────────────────────────────────────────
   // 헬퍼: 토스트 / 사운드 / 딜러 음성
@@ -386,7 +386,7 @@ export default function BaccaratLiveTable({
   // ────────────────────────────────────────────────
   // 라이프사이클
   // ────────────────────────────────────────────────
-  // 언마운트: 미전송 칩 환불 + 타이머 정리
+  // 언마운트: 타이머 정리 (칩은 화면에만 있어 환불 불필요)
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -395,8 +395,6 @@ export default function BaccaratLiveTable({
       clearTimeout(nextTimerRef.current);
       clearTimeout(speakTimerRef.current);
       clearTimeout(toastTimerRef.current);
-      const amt = unsentRef.current;
-      if (amt > 0) { unsentRef.current = 0; onPointsDeltaRef.current(amt); }
       stopBGM();
     };
   }, []);
@@ -416,6 +414,27 @@ export default function BaccaratLiveTable({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId, userId]);
+
+  // 하트비트: 10초마다 접속 유지 + "칩을 만지는 중" 신호 (끊기면 서버가 자동으로 정리)
+  const engagedRef = useRef(false);
+  engagedRef.current = phase !== "betting" || totalBet > 0;
+  useEffect(() => {
+    if (!tableId || !userId) return;
+    const id = setInterval(() => sendHeartbeat(tableId, engagedRef.current), 10000);
+    return () => clearInterval(id);
+  }, [tableId, userId]);
+
+  // READY 후 대기: 1초 카운트 + 5초마다 READY 재전송 (서버가 20초 경과/유령 정리 후 진행시킴)
+  useEffect(() => {
+    if (phase !== "waiting_ready") { setWaitSeconds(0); return; }
+    let n = 0;
+    const id = setInterval(() => {
+      n += 1;
+      setWaitSeconds(n);
+      if (n % 5 === 0 && !sendingRef.current) sendReady(tableId).catch(() => {});
+    }, 1000);
+    return () => clearInterval(id);
+  }, [phase, tableId]);
 
   // BGM
   useEffect(() => { if (bgmOn) startBGM(); else stopBGM(); }, [bgmOn]);
@@ -574,6 +593,7 @@ export default function BaccaratLiveTable({
     setPCards(["empty", "empty"]);
     setBCards(["empty", "empty"]);
     setReadyError(false);
+    setLockedBase(null);
     thirdLockRef.current = false;
     setPhase("betting");
   };
@@ -619,19 +639,19 @@ export default function BaccaratLiveTable({
   // 베팅 액션
   // ────────────────────────────────────────────────
   const placeChip = (target) => {
-    if (phase !== "betting") return;
-    if (points < selectedChip) return showToast("포인트가 부족합니다");
+    if (phase !== "betting" || isSendingReady) return;
+    if (points - totalBet < selectedChip) return showToast("포인트가 부족합니다");
     if (totalBet + selectedChip > MAX_BET) return showToast(`최대 베팅 ${MAX_BET.toLocaleString()}`);
     playSound("chip");
-    onPointsDelta(-selectedChip);
+    // 첫 칩 → 즉시 "베팅 준비 중" 신호 (다른 플레이어가 READY 해도 잠깐 기다려줌)
+    if (totalBet === 0) sendHeartbeat(tableId, true);
     setBetStacks((prev) => ({ ...prev, [target]: [...prev[target], selectedChip] }));
     setBetHistory((prev) => [...prev, { target, amount: selectedChip }]);
   };
 
   const removeLastChip = () => {
-    if (phase !== "betting" || betHistory.length === 0) return;
+    if (phase !== "betting" || isSendingReady || betHistory.length === 0) return;
     const last = betHistory[betHistory.length - 1];
-    onPointsDelta(last.amount);
     setBetStacks((prev) => {
       const n = [...prev[last.target]];
       n.pop();
@@ -641,53 +661,51 @@ export default function BaccaratLiveTable({
   };
 
   const clearBets = () => {
-    if (phase !== "betting" || totalBet === 0) return;
-    onPointsDelta(totalBet);
+    if (phase !== "betting" || isSendingReady || totalBet === 0) return;
     setBetStacks(emptyStacks());
     setBetHistory([]);
+    sendHeartbeat(tableId, false);
   };
 
-  // READY / DEAL
+  // READY / DEAL : 서버가 한도·잔액 검증 → 포인트 차감 → 베팅 기록 → READY
   const handleReady = async () => {
     if (phase !== "betting" || sendingRef.current) return;
     if (totalMainBet === 0) return showToast("PLAYER / BANKER / TIE 중 한 곳에 베팅하세요");
     if (totalBet < MIN_BET) return showToast(`최소 베팅 ${MIN_BET.toLocaleString()}`);
     if (totalBet > MAX_BET) return showToast(`최대 베팅 ${MAX_BET.toLocaleString()}`);
+    if (points < totalBet) return showToast("포인트가 부족합니다");
 
     sendingRef.current = true;
     setIsSendingReady(true);
     setReadyError(false);
-    const round = serverCurrentRound;
+    setLockedBase(points);
+    let betDone = false;
 
     try {
-      // 같은 라운드에 베팅이 이미 저장됐다면 중복 저장 금지 (이중 지급 방지)
-      if (betSavedRoundRef.current !== round) {
-        await placeBaccaratBet({
-          userId,
-          nickname: userName,
-          tableId,
-          round,
-          bets: {
-            player: mainBets.player, banker: mainBets.banker, tie: mainBets.tie,
-            playerPair: sideBets.playerPair, bankerPair: sideBets.bankerPair, perfectPair: sideBets.perfectPair,
-          },
-          totalBet,
-          balanceBeforeBet: points + totalBet,
-        });
-        betSavedRoundRef.current = round;
-      }
-      mySubmittedRoundRef.current = round;
-      setBetRound(round);
+      const res = await placeBaccaratBet({
+        userId,
+        nickname: userName,
+        tableId,
+        bets: {
+          player: mainBets.player, banker: mainBets.banker, tie: mainBets.tie,
+          playerPair: sideBets.playerPair, bankerPair: sideBets.bankerPair, perfectPair: sideBets.perfectPair,
+        },
+      });
+      betDone = true;
+      mySubmittedRoundRef.current = res.round; // 라운드는 서버가 결정
+      setBetRound(res.round);
       setPhase("waiting_ready");
       speakDealer("Ready");
       await sendReady(tableId);
     } catch (err) {
       console.error("[Baccarat] READY 실패:", err);
-      if (betSavedRoundRef.current === round) {
+      if (betDone) {
+        // 베팅은 서버에 저장됨 → 재시도는 READY 만 (중복 차감 불가)
         setReadyError(true);
         showToast("서버 연결 실패 · 재시도를 눌러주세요");
       } else {
-        showToast("베팅 저장 실패: " + (err.message || err.code || ""));
+        setLockedBase(null);
+        showToast(err.message || "베팅 실패");
       }
     } finally {
       sendingRef.current = false;
@@ -732,21 +750,18 @@ export default function BaccaratLiveTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, serverCurrentRound, multi]);
 
-  // 로비 복귀
+  // 로비 복귀 (칩은 화면에만 있으므로 환불 불필요 / 제출된 베팅은 서버가 정산)
   const handleBack = () => {
-    if (phase === "betting") {
-      if (totalBet > 0) {
-        if (!window.confirm("베팅 중입니다. 나가시면 칩이 환불됩니다. 로비로 돌아가시겠습니까?")) return;
-        const amt = unsentRef.current;
-        unsentRef.current = 0;
-        if (amt > 0) onPointsDelta(amt);
-        setBetStacks(emptyStacks());
-        setBetHistory([]);
-      }
-      onLeave();
+    if (phase === "betting" || phase === "result") { onLeave(); return; }
+    const settled = myBet && myBet.round === betRound && myBet.settled;
+    if (phase === "waiting_ready" && !readyError && waitSeconds < 45) {
+      showToast("READY 후에는 결과가 나올 때까지 나갈 수 없습니다");
       return;
     }
-    if (phase === "result") { onLeave(); return; }
+    if ((phase === "dealing" || phase === "squeezing") && totalBet > 0 && !settled) {
+      showToast("정산 중입니다. 잠시만요");
+      return;
+    }
     if (window.confirm("게임 진행 중입니다. 나가도 베팅은 서버에서 자동 정산됩니다. 나가시겠습니까?")) onLeave();
   };
 
@@ -958,14 +973,14 @@ export default function BaccaratLiveTable({
               <button
                 key={v}
                 onClick={() => setSelectedChip(v)}
-                disabled={points < v}
+                disabled={points - totalBet < v}
                 style={{
                   ...S.chipBtn,
                   background: chipBg(v),
                   border: selectedChip === v ? "3px solid #FFD700" : "3px dashed rgba(255,255,255,0.65)",
                   boxShadow: selectedChip === v ? "0 0 16px rgba(255,215,0,0.7)" : "0 4px 10px rgba(0,0,0,0.5)",
                   transform: selectedChip === v ? "translateY(-3px) scale(1.06)" : "none",
-                  opacity: points < v ? 0.3 : 1,
+                  opacity: points - totalBet < v ? 0.3 : 1,
                 }}
               >
                 {fmtChip(v)}
@@ -985,7 +1000,7 @@ export default function BaccaratLiveTable({
           </div>
 
           <div style={S.infoLine}>
-            총 베팅 <strong>{totalBet.toLocaleString()}</strong> / 한도 {MAX_BET.toLocaleString()} · 보유 {points.toLocaleString()}
+            총 베팅 <strong>{totalBet.toLocaleString()}</strong> / 한도 {MAX_BET.toLocaleString()} · 보유 {shownPoints.toLocaleString()}
           </div>
 
           <div style={S.chipControls}>
@@ -1032,8 +1047,11 @@ export default function BaccaratLiveTable({
           <div style={{ fontSize: 14, fontWeight: 700 }}>{multi ? "다른 플레이어 대기 중..." : "카드를 준비하는 중..."}</div>
           {multi && (
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontFamily: "monospace" }}>
-              READY {serverReadyPlayers.length} / {playerCount}
+              READY {serverReadyPlayers.length} / {playerCount} · {Math.max(0, 20 - waitSeconds)}초 후 자동 진행
             </div>
+          )}
+          {waitSeconds >= 45 && !readyError && (
+            <button onClick={handleBack} style={{ ...S.revealAllBtn, marginTop: 6 }}>응답이 없습니다 · 로비로 나가기</button>
           )}
           {readyError && (
             <button onClick={retryReady} style={{ ...S.actionBtn, padding: 12, fontSize: 13, marginTop: 6 }}>🔄 다시 시도</button>

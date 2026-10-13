@@ -11,7 +11,7 @@
 // ===================================================================
 
 import { useState, useEffect } from "react";
-import { doc, getDoc, updateDoc, onSnapshot, increment } from "firebase/firestore";
+import { doc, getDoc, updateDoc, onSnapshot } from "firebase/firestore";
 import { db } from "./firebase";
 // ★ [변경] 바카라를 라이브 멀티플레이로 교체
 import BaccaratLobby from "./BaccaratLobby";
@@ -121,28 +121,17 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
     setScreen("baccarat_lobby");
   };
 
-  // ★ 바카라: 칩은 증감(delta)으로 저장 → 서버 정산 지급과 충돌 없음
-  const handleBaccaratDelta = async (delta) => {
-    if (!userId || !delta) return;
-    setPoints((p) => p + delta);
-    try {
-      await updateDoc(doc(db, "users", userId), { gamePoints: increment(delta) });
-    } catch (e) {
-      console.error("바카라 포인트 저장 실패:", e);
-      setPoints((p) => p - delta);
-    }
-  };
-
-  // ★ 바카라 화면에서는 서버가 지급한 정산 포인트를 실시간 반영
-  const inBaccarat = screen.startsWith("baccarat");
+  // ★ 바카라: 베팅 차감/정산 지급을 서버가 처리하므로 포인트를 실시간 동기화 (읽기 전용)
+  //   로비 화면에서도 유지 → 나가는 순간 도착하는 정산도 반영됨
+  const syncPoints = screen === "lobby" || screen.startsWith("baccarat");
   useEffect(() => {
-    if (!isOpen || !userId || !inBaccarat) return;
+    if (!isOpen || !userId || !syncPoints) return;
     const unsub = onSnapshot(doc(db, "users", userId), (snap) => {
       const gp = snap.data()?.gamePoints;
       if (typeof gp === "number") setPoints(gp);
     });
     return () => unsub();
-  }, [isOpen, userId, inBaccarat]);
+  }, [isOpen, userId, syncPoints]);
 
   if (!isOpen) return null;
 
@@ -185,7 +174,6 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
                 userId={userId}
                 userName={currentUser?.nickname || currentUser?.id || "GUEST"}
                 gamePoints={points}
-                onPointsDelta={handleBaccaratDelta}
                 onLeave={handleLeaveBaccaratTable}
               />
             )}

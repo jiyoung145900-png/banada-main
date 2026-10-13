@@ -160,40 +160,31 @@ export function useMyLatestBet(userId, tableId, round) {
 }
 
 // ──────────────────────────────────────────────────────────
-// 💰 베팅 저장 (유저 → Firestore)
+// 💰 베팅 (서버 함수가 한도/잔액 검증 + 포인트 차감 + 기록을 한 번에 처리)
+//   → { round, total }  (이미 베팅된 라운드면 { already: true, round })
 // ──────────────────────────────────────────────────────────
 
-export async function placeBaccaratBet({
-  userId,
-  nickname,
-  tableId,
-  round,
-  bets,
-  totalBet,
-  balanceBeforeBet,
-}) {
+export async function placeBaccaratBet({ userId, nickname, tableId, bets }) {
   if (!userId) throw new Error("userId 필요");
-  if (totalBet <= 0) throw new Error("베팅 금액 없음");
-  if (totalBet < MIN_BET) throw new Error(`최소 베팅: ${MIN_BET.toLocaleString()}`);
-  if (totalBet > MAX_BET) throw new Error(`최대 베팅: ${MAX_BET.toLocaleString()}`);
+  const total = Object.values(bets || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+  if (total < MIN_BET) throw new Error(`최소 베팅: ${MIN_BET.toLocaleString()}`);
+  if (total > MAX_BET) throw new Error(`최대 베팅: ${MAX_BET.toLocaleString()}`);
 
-  const betData = {
-    userId,
-    nickname: nickname || "GUEST",
-    tableId,
-    round,
-    bets,            // { player, banker, tie, playerPair, bankerPair, perfectPair }
-    totalBet,
-    balanceBeforeBet: balanceBeforeBet || 0,
-    settled: false,
-    payout: 0,
-    net: 0,
-    timestamp: serverTimestamp(),
-  };
+  const result = await callPlayBaccarat({ tableId, action: "bet", userId, nickname, bets });
+  return result.data;
+}
 
-  const docRef = await addDoc(collection(db, "baccarat_bets"), betData);
-  console.log(`[BaccaratFirestore] 베팅 저장: ${docRef.id}`, bets);
-  return docRef.id;
+// ──────────────────────────────────────────────────────────
+// 💓 하트비트 (10초마다) - 접속 유지 + "칩을 만지는 중" 신호
+//   engaged=true 면 다른 플레이어의 READY 를 기다리게 만듦 (구경꾼은 대기 대상 아님)
+// ──────────────────────────────────────────────────────────
+
+export async function sendHeartbeat(tableId, engaged = false) {
+  try {
+    await callPlayBaccarat({ tableId, action: "heartbeat", engaged: !!engaged });
+  } catch (err) {
+    // 조용히 무시 (다음 주기에 재시도)
+  }
 }
 
 // ──────────────────────────────────────────────────────────
