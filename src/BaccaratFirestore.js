@@ -127,3 +127,5 @@ export const dealBaccarat = (tableId) => invoke({ tableId, action: "deal" });
 export const peekBaccarat = (tableId, side, idx) => invoke({ tableId, action: "peek", side, idx });
 export const naturalBaccarat = (tableId) => invoke({ tableId, action: "natural" }).catch(() => null);
 export const revealAllBaccarat = (tableId) => invoke({ tableId, action: "reveal" });
+// 자기 쪽(소유자) 카드 전체 공개: side = "player" | "banker"
+export const revealSideBaccarat = (tableId, side) => invoke({ tableId, action: "reveal", side });

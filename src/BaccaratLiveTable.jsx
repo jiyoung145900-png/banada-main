@@ -12,7 +12,7 @@ import { speak, setVoiceEnabled, setBgmEnabled, startBGM, stopBGM } from "./Bacc
 import {
   useBaccaratTable, useRoundBets, useBaccaratHistory, useMyBet,
   joinBaccaratTable, heartbeatBaccarat, leaveBaccaratTable,
-  placeBaccaratBet, dealBaccarat, peekBaccarat, naturalBaccarat, revealAllBaccarat,
+  placeBaccaratBet, dealBaccarat, peekBaccarat, naturalBaccarat, revealSideBaccarat,
   serverNowMs, MIN_BET, MAX_BET,
 } from "./BaccaratFirestore";
 
@@ -136,31 +136,45 @@ function CardCenter({ rank, suit, isRed }) {
   );
 }
 
-function Card3D({ card, state, onClick, highlight, fromX = -120 }) {
+// 쪼기 모서리: t = 0(뒷면 전체) ~ 4(공개). 정수 단계 사이는 선형 보간 → 드래그와 연속
+const PEEL_A = [0, 32, 55, 85, 100];
+const PEEL_B = [100, 78, 55, 25, 0];
+const LEVEL_OF = { back: 0, peek1: 1, peek2: 2, peek3: 3, revealed: 4 };
+function peelClip(t) {
+  const i = Math.min(3, Math.floor(t));
+  const f = t - i;
+  const a = PEEL_A[i] + (PEEL_A[i + 1] - PEEL_A[i]) * f;
+  const b = PEEL_B[i] + (PEEL_B[i + 1] - PEEL_B[i]) * f;
+  return `polygon(0% 0%, 100% 0%, 100% 100%, ${a}% 100%, 0% ${b}%)`;
+}
+
+function Card3D({ card, state, onClick, highlight, fromX = -120, dragT = null, canDrag = false, onDragStart, onDragMove, onDragEnd }) {
   const isRed = card?.suit === "♥" || card?.suit === "♦";
   const clickable = UNREVEALED.includes(state);
   if (state === "empty") return <div style={{ width: 62, height: 87, margin: "0 3px" }} />;
 
-  const clip = {
-    back: "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",
-    peek1: "polygon(0% 0%, 100% 0%, 100% 100%, 32% 100%, 0% 78%)",
-    peek2: "polygon(0% 0%, 100% 0%, 100% 100%, 55% 100%, 0% 55%)",
-    peek3: "polygon(0% 0%, 100% 0%, 100% 100%, 85% 100%, 0% 25%)",
-    revealed: "polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%)",
-  }[state] || "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
+  const isRevealed = state === "revealed";
+  const t = dragT !== null ? Math.min(3.99, dragT) : (LEVEL_OF[state] ?? 0);
+  const clip = isRevealed ? "polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%)" : peelClip(t);
+  const dragging = dragT !== null;
 
   return (
     <div
-      onClick={clickable ? onClick : undefined}
+      onClick={clickable && !canDrag ? onClick : undefined}
+      onPointerDown={canDrag ? onDragStart : undefined}
+      onPointerMove={canDrag ? onDragMove : undefined}
+      onPointerUp={canDrag ? onDragEnd : undefined}
+      onPointerCancel={canDrag ? onDragEnd : undefined}
       style={{
         width: 62, height: 87, margin: "0 3px", position: "relative",
-        cursor: clickable ? "pointer" : "default",
-        animation: state === "back" ? "dealIn 0.45s ease-out" : "none",
+        cursor: canDrag ? (dragging ? "grabbing" : "grab") : clickable ? "pointer" : "default",
+        touchAction: "none", userSelect: "none",
+        animation: state === "back" && !dragging ? "dealIn 0.45s ease-out" : "none",
         "--fx": `${fromX}px`, "--fy": "-130px",
       }}
     >
-      {state === "back" && <div style={S.peekHint}>👆</div>}
-      {(state === "peek1" || state === "peek2" || state === "peek3") && <div style={{ ...S.peekHint, color: "#FFD700" }}>👁</div>}
+      {state === "back" && !dragging && <div style={S.peekHint}>{canDrag ? "👆 잡고 끌기" : "👆"}</div>}
+      {(state === "peek1" || state === "peek2" || state === "peek3") && !dragging && <div style={{ ...S.peekHint, color: "#FFD700" }}>👁</div>}
 
       <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: 8, boxShadow: highlight ? "0 0 20px rgba(255,215,0,0.8), 0 8px 20px rgba(0,0,0,0.6)" : "0 8px 20px rgba(0,0,0,0.6)" }}>
         {/* 앞면 */}
@@ -173,8 +187,8 @@ function Card3D({ card, state, onClick, highlight, fromX = -120 }) {
             <div style={{ fontWeight: 900 }}>{card?.rank}</div><div style={{ fontSize: 11 }}>{card?.suit}</div>
           </div>
         </div>
-        {/* 뒷면 (쪼기 clip-path) */}
-        <div style={{ position: "absolute", inset: 0, borderRadius: 8, background: "linear-gradient(135deg, #4A1033 0%, #2A0520 50%, #1A0512 100%)", border: "2px solid #D4A574", display: "flex", alignItems: "center", justifyContent: "center", clipPath: clip, WebkitClipPath: clip, transition: "clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1)", boxSizing: "border-box" }}>
+        {/* 뒷면 (드래그/단계에 따라 모서리가 들림) */}
+        <div style={{ position: "absolute", inset: 0, borderRadius: 8, background: "linear-gradient(135deg, #4A1033 0%, #2A0520 50%, #1A0512 100%)", border: "2px solid #D4A574", display: "flex", alignItems: "center", justifyContent: "center", clipPath: clip, WebkitClipPath: clip, transition: dragging ? "none" : "clip-path 0.35s cubic-bezier(0.4, 0, 0.2, 1)", boxSizing: "border-box" }}>
           <div style={{ border: "1px dashed rgba(212,165,116,0.6)", width: "80%", height: "86%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, color: "#D4A574" }}>
             <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1, opacity: 0.8 }}>VIP</div>
             <div style={{ fontSize: 22 }}>♦</div>
@@ -461,6 +475,8 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
 
   // 쪼기 (공유): 서버에 한 단계 요청 → 모든 화면에 같이 반영
   const peekPending = useRef({});
+  const drag = useRef(null);
+  const [dragView, setDragView] = useState(null);
   const squeeze = async (side, idx) => {
     if (phase !== "dealing" || elapsed < NATURAL_WAIT) return;
     const key = `${side}${idx}`;
@@ -468,16 +484,79 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     peekPending.current[key] = true;
     playSound("peek");
     try { await peekBaccarat(tableId, side === "p" ? "player" : "banker", idx); }
-    catch (e) { /* 이미 공개됐거나 레이스 → 무시 */ }
+    catch (e) { showToast(e.message || "쪼기 실패"); }
     finally { peekPending.current[key] = false; }
   };
-  const revealAll = async () => {
+
+  // 자리별 카드 담당 = 그 자리에 가장 많이 건 접속 중 플레이어 (서버와 동일 규칙)
+  const ownerOf = (k) => {
+    const own = (table?.areaOwn || {})[k] || {};
+    const order = table?.betOrder || {};
+    const list = Object.keys(own)
+      .filter((u) => own[u] > 0 && players.includes(u))
+      .sort((a, b) => own[b] - own[a] || (order[a] || 0) - (order[b] || 0));
+    return list.length ? list[0] : null;
+  };
+  const ownerP = ownerOf("p");
+  const ownerB = ownerOf("b");
+  const iOwn = (k) => (k === "p" ? ownerP : ownerB) === userId;
+  const canSqueeze = (side) => {
+    if (phase !== "dealing" || elapsed < NATURAL_WAIT) return false;
+    const owner = side === "p" ? ownerP : ownerB;
+    return owner === userId || (owner === null && players.includes(userId));
+  };
+  const ownerLabel = (k) => {
+    const o = k === "p" ? ownerP : ownerB;
+    if (!o) return "누구나 깔 수 있음";
+    return o === userId ? "👉 내가 깝니다" : `🫴 ${names[o] || "플레이어"} 님이 깝니다`;
+  };
+
+  // 드래그 쪼기: 잡고 좌우로 끌면 모서리가 같이 들림. 60% 이상 끌거나 가볍게 누르면 한 단계 공개
+  const DRAG_FULL_PX = 120;
+  const onDragStart = (side, idx) => (e) => {
+    if (!canSqueeze(side)) {
+      const o = side === "p" ? ownerP : ownerB;
+      showToast(o ? `${names[o] || "상대"} 님이 까는 쪽입니다` : "지금은 쪼갤 수 없습니다");
+      return;
+    }
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    const d = { side, idx, startX: e.clientX, dx: 0 };
+    drag.current = d;
+    setDragView({ ...d });
+  };
+  const onDragMove = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    d.dx = e.clientX - d.startX;
+    setDragView({ ...d });
+  };
+  const onDragEnd = () => {
+    const d = drag.current;
+    drag.current = null;
+    setDragView(null);
+    if (!d) return;
+    const progress = Math.min(1, Math.abs(d.dx) / DRAG_FULL_PX);
+    const tap = Math.abs(d.dx) < 6;
+    if (progress >= 0.5 || tap) squeeze(d.side, d.idx);
+  };
+  // 드래그 중인 카드의 진행도 (현재 단계 + 끈 정도) — 뒤집힌 단계부터 이어서
+  const dragTFor = (side, idx, state) => {
+    const d = dragView;
+    if (!d || d.side !== side || d.idx !== idx) return null;
+    const base = LEVEL_OF[state] ?? 0;
+    return base + Math.min(1, Math.abs(d.dx) / DRAG_FULL_PX);
+  };
+
+  // 내 쪽 전체 공개 (자기 쪽 소유자만)
+  const revealMySide = async (k) => {
     if (phase !== "dealing" || elapsed < NATURAL_WAIT) return;
     playSound("reveal");
-    try { await revealAllBaccarat(tableId); } catch (e) {}
+    try { await revealSideBaccarat(tableId, k === "p" ? "player" : "banker"); }
+    catch (e) { showToast(e.message || "공개 실패"); }
   };
   const hasUnrevealed = [...pStates, ...bStates].some((s) => ["back", "peek1", "peek2", "peek3"].includes(s));
-  const squeezeOpen = phase === "dealing" && elapsed >= NATURAL_WAIT;
+  const mySideOpen = (k) => iOwn(k) && phase === "dealing" && elapsed >= NATURAL_WAIT
+    && (k === "p" ? pStates : bStates).some((s) => ["back", "peek1", "peek2", "peek3"].includes(s));
 
   // 표시 값
   const revealedScore = (side) => {
@@ -577,9 +656,13 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
         <div style={S.tableFelt}>
           <div style={S.playerSide}>
             <div style={S.sideTitle}>PLAYER</div>
+            {phase === "dealing" && <div style={S.ownerTag}>{ownerLabel("p")}</div>}
             <div style={S.cardsContainer}>
               {pStates.map((st, i) => (
                 <Card3D key={`p${i}`} card={revealV.p[i] || undefined} state={st} fromX={-60}
+                  dragT={dragTFor("p", i, st)}
+                  canDrag={canSqueeze("p") && ["back", "peek1", "peek2", "peek3"].includes(st)}
+                  onDragStart={onDragStart("p", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
                   onClick={() => squeeze("p", i)} highlight={!!lastRes && lastRes.winner === "player" && phase === "betting"} />
               ))}
             </div>
@@ -588,9 +671,13 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           <div style={S.vsText}>VS</div>
           <div style={S.bankerSide}>
             <div style={{ ...S.sideTitle, color: "#E63975" }}>BANKER</div>
+            {phase === "dealing" && <div style={S.ownerTag}>{ownerLabel("b")}</div>}
             <div style={S.cardsContainer}>
               {bStates.map((st, i) => (
                 <Card3D key={`b${i}`} card={revealV.b[i] || undefined} state={st} fromX={-230}
+                  dragT={dragTFor("b", i, st)}
+                  canDrag={canSqueeze("b") && ["back", "peek1", "peek2", "peek3"].includes(st)}
+                  onDragStart={onDragStart("b", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
                   onClick={() => squeeze("b", i)} highlight={!!lastRes && lastRes.winner === "banker" && phase === "betting"} />
               ))}
             </div>
@@ -670,11 +757,14 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           <div style={{ fontSize: 14, fontWeight: 700 }}>{elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : hasUnrevealed ? "카드를 터치해서 열어보세요 👆" : "마무리 중..."}</div>
         </div>
       )}
-      {squeezeOpen && hasUnrevealed && (
-        <div>
-          <div style={S.squeezeGuide}>누가 터치하든 모든 플레이어 화면에 똑같이 열립니다</div>
-          <button onClick={revealAll} style={S.revealAllBtn}>👁 모두 공개 (SKIP)</button>
-        </div>
+      {mySideOpen("p") && (
+        <button onClick={() => revealMySide("p")} style={S.revealAllBtn}>👁 내 쪽 PLAYER 카드 모두 열기</button>
+      )}
+      {mySideOpen("b") && (
+        <button onClick={() => revealMySide("b")} style={{ ...S.revealAllBtn, marginTop: 6 }}>👁 내 쪽 BANKER 카드 모두 열기</button>
+      )}
+      {phase === "dealing" && elapsed >= NATURAL_WAIT && hasUnrevealed && !mySideOpen("p") && !mySideOpen("b") && (
+        <div style={S.squeezeGuide}>카드는 담당 플레이어가 잡고 끌어서 엽니다 (좌우로 끌기)</div>
       )}
     </div>
   );
@@ -764,6 +854,7 @@ const S = {
   actionBtn: { width: "100%", padding: 18, background: "linear-gradient(135deg, #D4A574, #B07D46)", border: "none", color: "#000", borderRadius: 16, fontSize: 15, fontWeight: 900, letterSpacing: 2, cursor: "pointer", boxShadow: "0 8px 20px rgba(212,165,116,0.3)" },
 
   statusBar: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: 16, background: "rgba(212,165,116,0.08)", border: "1px dashed rgba(212,165,116,0.35)", borderRadius: 14, textAlign: "center", color: "#D4A574", fontSize: 13, fontWeight: 700 },
+  ownerTag: { fontSize: 10, color: "rgba(255,255,255,0.7)", marginTop: -8, marginBottom: 10, letterSpacing: 0.5 },
   squeezeGuide: { textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.55)", margin: "4px 0 10px", padding: 6, background: "rgba(255,255,255,0.03)", borderRadius: 8 },
   revealAllBtn: { width: "100%", padding: 14, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(212,165,116,0.4)", color: "#F0D4B8", borderRadius: 14, fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: 1 },
 
