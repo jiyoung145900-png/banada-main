@@ -129,7 +129,10 @@ export const placeBaccaratBet = ({ tableId, bets }) => invoke({ tableId, action:
 // 시작 요청 (여러 번 호출해도 안전): 조건이 되면 시작, 아니면 { waiting: true }
 export const startBaccarat = (tableId) => invoke({ tableId, action: "start" });
 
-export const peekBaccarat = (tableId, side, idx) => invoke({ tableId, action: "peek", side, idx });
+// 카드 한 장 열기 (손으로 충분히 깐 카드를 모두에게 공개). side: "player" | "banker"
+export const openBaccarat = (tableId, side, idx) => invoke({ tableId, action: "open", side, idx });
+// 내가 깔 수 있는 카드의 실제 앞면 (담당자에게만 내려옴)
+export const myCardsBaccarat = (tableId) => invoke({ tableId, action: "myCards" });
 export const naturalBaccarat = (tableId) => invoke({ tableId, action: "natural" }).catch(() => null);
 // 내가 깔 수 있는 쪽 카드 모두 열기
 export const revealMineBaccarat = (tableId) => invoke({ tableId, action: "reveal" });

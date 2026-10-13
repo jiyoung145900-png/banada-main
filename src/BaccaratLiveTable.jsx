@@ -1,9 +1,9 @@
 // ===================================================================
-// 🎰 BANADA VIP BACCARAT · LIVE v4
+// 🎰 BANADA VIP BACCARAT · LIVE v5
 // ===================================================================
 // 혼자: 베팅 확정 → 바로 시작 / 여러 명: 모두 확정하면 시작 (20초 뒤 자동)
-// 카드는 자리(PLAYER/BANKER)별 최다 베팅자가 잡고 끌어서 깝니다.
-// 모든 진행 상태는 서버(table 문서)가 원천 → 모든 플레이어가 같은 화면.
+// 카드: 자리(PLAYER/BANKER)별 최다 베팅자가 담당. 카드를 잡고 끄는 대로 접히고,
+//       충분히 열린 채 놓으면 활짝 열려 모두에게 공개됩니다. (앞면은 담당자에게만 미리 전달)
 // ===================================================================
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
@@ -13,7 +13,7 @@ import { speak, setVoiceEnabled, setBgmEnabled, startBGM, stopBGM } from "./Bacc
 import {
   useBaccaratTable, useRoundBets, useBaccaratHistory, useMyBet,
   setBaccaratUser, joinBaccaratTable, heartbeatBaccarat, leaveBaccaratTable,
-  placeBaccaratBet, startBaccarat, peekBaccarat, naturalBaccarat, revealMineBaccarat,
+  placeBaccaratBet, startBaccarat, openBaccarat, myCardsBaccarat, naturalBaccarat, revealMineBaccarat,
   serverNowMs, MIN_BET, MAX_BET,
 } from "./BaccaratFirestore";
 
@@ -137,47 +137,196 @@ function CardCenter({ rank, suit, isRed }) {
   );
 }
 
-// 쪼기 모서리: t = 0(뒷면 전체) ~ 4(공개). 정수 단계 사이는 선형 보간 → 드래그와 연속
-const PEEL_A = [0, 32, 55, 85, 100];
-const PEEL_B = [100, 78, 55, 25, 0];
-const LEVEL_OF = { back: 0, peek1: 1, peek2: 2, peek3: 3, revealed: 4 };
-function peelClip(t) {
-  const i = Math.min(3, Math.floor(t));
-  const f = t - i;
-  const a = PEEL_A[i] + (PEEL_A[i + 1] - PEEL_A[i]) * f;
-  const b = PEEL_B[i] + (PEEL_B[i + 1] - PEEL_B[i]) * f;
-  return `polygon(0% 0%, 100% 0%, 100% 100%, ${a}% 100%, 0% ${b}%)`;
+// ── 손으로 까는 카드 ────────────────────────────────────────────────
+// 카드를 잡으면 커지고, 끄는 방향으로 접힘(fold)이 손가락을 1:1로 따라감.
+// 접히는 선은 끄는 방향에 수직이라, 좌우/대각선으로 흔들면 선도 같이 돌아감.
+// 충분히(55%+) 열린 채 놓으면 활짝 열리며 서버에 '열기' 요청, 덜 열렸으면 제자리로 복귀.
+const CARD_W = 62;
+const CARD_H = 87;
+const SQUEEZE_SCALE = 2;      // 잡는 동안 카드 확대 배율 (앞면이 잘 보이게)
+const SQUEEZE_GAIN = 1.1;     // 손가락 이동 → 접힘 이동 (1 = 손가락과 정확히 같은 속도)
+const COMMIT_FRACTION = 0.55; // 이 비율 이상 열린 채 놓으면 활짝 열림
+const FULL_POLY = "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
+const OPEN_POLY = "polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%)";
+const CORNERS = [[0, 0], [CARD_W, 0], [CARD_W, CARD_H], [0, CARD_H]];
+
+// 카드 ∩ {(q - A)·n >= s} : 접히지 않고 남아 있는 '뒷면' 영역
+export function coverPolygon(A, n, s) {
+  const f = (q) => (q[0] - A[0]) * n[0] + (q[1] - A[1]) * n[1] - s;
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const p = CORNERS[i];
+    const q = CORNERS[(i + 1) % 4];
+    const fp = f(p);
+    const fq = f(q);
+    if (fp >= 0) out.push(p);
+    if ((fp >= 0) !== (fq >= 0)) {
+      const t = fp / (fp - fq);
+      out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+    }
+  }
+  return out;
 }
+export function polyArea(pts) {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    a += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a) / 2;
+}
+export const revealFraction = (A, n, s) => 1 - polyArea(coverPolygon(A, n, s)) / (CARD_W * CARD_H);
+const toClip = (pts) =>
+  pts.length < 3
+    ? OPEN_POLY
+    : `polygon(${pts.map(([x, y]) => `${((x / CARD_W) * 100).toFixed(2)}% ${((y / CARD_H) * 100).toFixed(2)}%`).join(", ")})`;
+// 접힘이 카드 전체를 덮는 거리
+const fullFold = (A, n) => Math.max(...CORNERS.map((c) => (c[0] - A[0]) * n[0] + (c[1] - A[1]) * n[1])) + 1;
 
-function Card3D({ card, state, onClick, highlight, fromX = -120, dragT = null, canDrag = false, onDragStart, onDragMove, onDragEnd }) {
+export function Card3D({ card, state, interactive = false, onCommit, highlight, fromX = -120 }) {
+  const rootRef = useRef(null);
+  const dragRef = useRef(null);
+  const foldRef = useRef(null);
+  const rafRef = useRef(0);
+  const failedRef = useRef(false);
+  const [fold, setFold] = useState(null);      // { A, n, s } 접힘 상태 (없으면 null)
+  const [pressed, setPressed] = useState(false);
+  const [tilt, setTilt] = useState(0);
+  const [localOpen, setLocalOpen] = useState(false);
+
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+  // 다음 라운드(빈 자리)가 되면 로컬 상태 초기화
+  useEffect(() => {
+    if (state === "empty") { setLocalOpen(false); setFold(null); foldRef.current = null; }
+  }, [state]);
+
+  const setFoldBoth = (f) => { foldRef.current = f; setFold(f); };
+  const animate = (from, to, ms, step, done) => {
+    cancelAnimationFrame(rafRef.current);
+    // 시작 시각은 rAF 가 주는 첫 프레임 시각으로 잡음 (performance.now 와 기준이 달라도 안전)
+    let t0 = null;
+    const tick = (now) => {
+      if (t0 === null) t0 = now;
+      const p = Math.min(1, (now - t0) / ms);
+      const e = 1 - Math.pow(1 - p, 3);
+      step(from + (to - from) * e);
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+      else if (done) done();
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const canGrab = interactive && state === "back" && !localOpen;
+
+  const onPointerDown = (e) => {
+    if (!canGrab) return;
+    cancelAnimationFrame(rafRef.current);
+    const r = rootRef.current.getBoundingClientRect();
+    const lx = (e.clientX - r.left) * (CARD_W / (r.width || CARD_W));
+    const ly = (e.clientY - r.top) * (CARD_H / (r.height || CARD_H));
+    let A = CORNERS[0];
+    let best = Infinity;
+    for (const c of CORNERS) {
+      const d = Math.hypot(c[0] - lx, c[1] - ly);
+      if (d < best) { best = d; A = c; }
+    }
+    dragRef.current = { x0: e.clientX, y0: e.clientY, A, moved: false };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    setFoldBoth(null);
+    setPressed(true);
+  };
+
+  const onPointerMove = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.x0;
+    const dy = e.clientY - d.y0;
+    if (Math.hypot(dx, dy) > 4) d.moved = true;
+    const k = SQUEEZE_GAIN / SQUEEZE_SCALE;
+    const lx = dx * k;
+    const ly = dy * k;
+    const len = Math.hypot(lx, ly);
+    setTilt(Math.max(-8, Math.min(8, dx / 14)));
+    if (len < 0.5) { setFoldBoth(null); return; }
+    setFoldBoth({ A: d.A, n: [lx / len, ly / len], s: len });
+  };
+
+  const commit = (A, n, s0) => {
+    failedRef.current = false;
+    // 서버에 즉시 알림 (애니메이션과 동시에). 실패하면 원래대로 되돌림
+    Promise.resolve(onCommit && onCommit()).catch(() => {
+      failedRef.current = true;
+      cancelAnimationFrame(rafRef.current);
+      setLocalOpen(false);
+      setFoldBoth(null);
+    });
+    animate(s0, fullFold(A, n), 170, (s) => setFoldBoth({ A, n, s }), () => {
+      if (!failedRef.current) { setLocalOpen(true); setFoldBoth(null); }
+    });
+  };
+
+  const finish = (cancelled) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setPressed(false);
+    setTilt(0);
+    if (!d) return;
+    const cur = foldRef.current;
+    if (!d.moved && !cancelled) {
+      // 살짝 눌렀다 뗌(탭): 잡은 모서리에서 반대쪽으로 활짝 열기
+      const opp = [CARD_W - d.A[0], CARD_H - d.A[1]];
+      const vx = opp[0] - d.A[0];
+      const vy = opp[1] - d.A[1];
+      const len = Math.hypot(vx, vy);
+      commit(d.A, [vx / len, vy / len], 0);
+      return;
+    }
+    if (cur && !cancelled && revealFraction(cur.A, cur.n, cur.s) >= COMMIT_FRACTION) {
+      commit(cur.A, cur.n, cur.s);
+    } else if (cur) {
+      // 덜 열렸으면 제자리로 복귀
+      animate(cur.s, 0, 160, (s) => setFoldBoth({ ...cur, s }), () => setFoldBoth(null));
+    }
+  };
+
+  if (state === "empty") return <div style={{ width: CARD_W, height: CARD_H, margin: "0 3px" }} />;
+
   const isRed = card?.suit === "♥" || card?.suit === "♦";
-  const clickable = UNREVEALED.includes(state);
-  if (state === "empty") return <div style={{ width: 62, height: 87, margin: "0 3px" }} />;
-
-  const isRevealed = state === "revealed";
-  const t = dragT !== null ? Math.min(3.99, dragT) : (LEVEL_OF[state] ?? 0);
-  const clip = isRevealed ? "polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%)" : peelClip(t);
-  const dragging = dragT !== null;
+  const isOpen = state === "revealed" || localOpen;
+  const folding = !!fold && fold.s > 0.5;
+  const clip = isOpen ? OPEN_POLY : folding ? toClip(coverPolygon(fold.A, fold.n, fold.s)) : FULL_POLY;
 
   return (
     <div
-      onClick={clickable && !canDrag ? onClick : undefined}
-      onPointerDown={canDrag ? onDragStart : undefined}
-      onPointerMove={canDrag ? onDragMove : undefined}
-      onPointerUp={canDrag ? onDragEnd : undefined}
-      onPointerCancel={canDrag ? onDragEnd : undefined}
+      ref={rootRef}
+      data-card={isOpen ? "open" : "back"}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={() => finish(false)}
+      onPointerCancel={() => finish(true)}
       style={{
-        width: 62, height: 87, margin: "0 3px", position: "relative",
-        cursor: canDrag ? (dragging ? "grabbing" : "grab") : clickable ? "pointer" : "default",
-        touchAction: "none", userSelect: "none",
-        animation: state === "back" && !dragging ? "dealIn 0.45s ease-out" : "none",
+        width: CARD_W, height: CARD_H, margin: "0 3px", position: "relative",
+        zIndex: pressed ? 100 : 1,
+        touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
+        cursor: canGrab ? (pressed ? "grabbing" : "grab") : "default",
+        animation: state === "back" ? "dealIn 0.45s ease-out" : "none",
         "--fx": `${fromX}px`, "--fy": "-130px",
       }}
     >
-      {state === "back" && !dragging && <div style={S.peekHint}>{canDrag ? "👆 잡고 끌기" : "👆"}</div>}
-      {(state === "peek1" || state === "peek2" || state === "peek3") && !dragging && <div style={{ ...S.peekHint, color: "#FFD700" }}>👁</div>}
+      {canGrab && !pressed && <div style={S.peekHint}>👆</div>}
 
-      <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: 8, boxShadow: highlight ? "0 0 20px rgba(255,215,0,0.8), 0 8px 20px rgba(0,0,0,0.6)" : "0 8px 20px rgba(0,0,0,0.6)" }}>
+      <div
+        style={{
+          position: "relative", width: "100%", height: "100%", borderRadius: 8,
+          transformOrigin: "center",
+          transform: pressed ? `scale(${SQUEEZE_SCALE}) rotate(${tilt}deg)` : "none",
+          transition: pressed ? "transform 0.12s ease-out" : "transform 0.22s ease-in",
+          boxShadow: pressed
+            ? "0 18px 36px rgba(0,0,0,0.7)"
+            : highlight ? "0 0 20px rgba(255,215,0,0.8), 0 8px 20px rgba(0,0,0,0.6)" : "0 8px 20px rgba(0,0,0,0.6)",
+        }}
+      >
         {/* 앞면 */}
         <div style={{ position: "absolute", inset: 0, borderRadius: 8, background: "linear-gradient(145deg, #ffffff, #f0f0f0)", color: isRed ? "#E63975" : "#1F0817", overflow: "hidden" }}>
           <div style={{ position: "absolute", top: 4, left: 5, fontSize: 13, lineHeight: 1, textAlign: "center", fontFamily: "serif" }}>
@@ -188,12 +337,24 @@ function Card3D({ card, state, onClick, highlight, fromX = -120, dragT = null, c
             <div style={{ fontWeight: 900 }}>{card?.rank}</div><div style={{ fontSize: 11 }}>{card?.suit}</div>
           </div>
         </div>
-        {/* 뒷면 (드래그/단계에 따라 모서리가 들림) */}
-        <div style={{ position: "absolute", inset: 0, borderRadius: 8, background: "linear-gradient(135deg, #4A1033 0%, #2A0520 50%, #1A0512 100%)", border: "2px solid #D4A574", display: "flex", alignItems: "center", justifyContent: "center", clipPath: clip, WebkitClipPath: clip, transition: dragging ? "none" : "clip-path 0.35s cubic-bezier(0.4, 0, 0.2, 1)", boxSizing: "border-box" }}>
-          <div style={{ border: "1px dashed rgba(212,165,116,0.6)", width: "80%", height: "86%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, color: "#D4A574" }}>
-            <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1, opacity: 0.8 }}>VIP</div>
-            <div style={{ fontSize: 22 }}>♦</div>
-            <div style={{ fontSize: 7, letterSpacing: 2, opacity: 0.6 }}>BACCARAT</div>
+        {/* 뒷면: 접힌 만큼 잘려 나감 (자른 모서리에 그림자) */}
+        <div style={{ position: "absolute", inset: 0, filter: folding ? "drop-shadow(0 3px 5px rgba(0,0,0,0.55))" : "none" }}>
+          <div
+            data-cover={clip}
+            style={{
+              position: "absolute", inset: 0, borderRadius: 8,
+              background: "linear-gradient(135deg, #4A1033 0%, #2A0520 50%, #1A0512 100%)",
+              border: "2px solid #D4A574", boxSizing: "border-box",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              clipPath: clip, WebkitClipPath: clip,
+              transition: folding ? "none" : "clip-path 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+            }}
+          >
+            <div style={{ border: "1px dashed rgba(212,165,116,0.6)", width: "80%", height: "86%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, color: "#D4A574" }}>
+              <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1, opacity: 0.8 }}>VIP</div>
+              <div style={{ fontSize: 22 }}>♦</div>
+              <div style={{ fontSize: 7, letterSpacing: 2, opacity: 0.6 }}>BACCARAT</div>
+            </div>
           </div>
         </div>
       </div>
@@ -201,9 +362,6 @@ function Card3D({ card, state, onClick, highlight, fromX = -120, dragT = null, c
   );
 }
 
-// ────────────────────────────────────────────────────
-// 베팅 UI 조각
-// ────────────────────────────────────────────────────
 function PlacedChips({ stack }) {
   if (!stack.length) return null;
   const visible = stack.slice(-3);
@@ -241,13 +399,13 @@ function BetBox({ label, sub, color, stack, onClick, disabled, compact }) {
 
 
 
+
 // ====================================================================
 // 메인 컴포넌트 v4
 //   혼자: 베팅 확정 → 바로 시작 / 여러 명: 모두 확정하면 시작(20초 뒤 자동)
 //   카드는 자리별 담당(최다 베팅자)이 잡고 끌어서 까고, '모두 열기' 로 한 번에 열 수도 있음
 // ====================================================================
 const NATURAL_WAIT = 2000;
-const LEVEL_STATE = ["back", "peek1", "peek2", "peek3", "revealed"];
 const AREA_KEYS = ["player", "banker", "tie", "playerPair", "bankerPair", "perfectPair"];
 const UNREVEALED_STATES = ["back", "peek1", "peek2", "peek3"];
 const STALE_MS = 30000;
@@ -391,7 +549,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     for (let i = 0; i < 3; i++) {
       if (i >= drawn[side]) { arr.push("empty"); continue; }
       if (i < 2 && i >= cnt) { arr.push("empty"); continue; }
-      arr.push(LEVEL_STATE[peek[side][i] ?? 0]);
+      arr.push((peek[side][i] ?? 0) >= 4 ? "revealed" : "back");
     }
     return arr;
   };
@@ -466,53 +624,28 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const sideHasUnrevealed = (side) => (side === "p" ? pStates : bStates).some((s) => UNREVEALED_STATES.includes(s));
   const canRevealMine = squeezeOpen && ((canSqueeze("p") && sideHasUnrevealed("p")) || (canSqueeze("b") && sideHasUnrevealed("b")));
 
-  // ── 쪼기 (한 단계씩) / 드래그 / 모두 열기 ──
-  const peekPending = useRef({});
-  const drag = useRef(null);
-  const [dragView, setDragView] = useState(null);
-  const DRAG_FULL_PX = 120;
+  // ── 카드 열기 ──
+  //   끄는 동작은 Card3D 안에서 손가락을 1:1 로 따라가고, 충분히 열린 채 놓으면 onCommit → 서버에 '열기'
+  const openCard = async (side, idx) => {
+    playSound("reveal");
+    try { await openBaccarat(tableId, side === "p" ? "player" : "banker", idx); }
+    catch (e) { showToast(e.message || "열기 실패"); throw e; }
+  };
 
-  const squeeze = async (side, idx) => {
-    if (!squeezeOpen) return;
-    const key = `${side}${idx}`;
-    if (peekPending.current[key]) return;
-    peekPending.current[key] = true;
-    playSound("peek");
-    try { await peekBaccarat(tableId, side === "p" ? "player" : "banker", idx); }
-    catch (e) { showToast(e.message || "쪼기 실패"); }
-    finally { peekPending.current[key] = false; }
-  };
-  const onDragStart = (side, idx) => (e) => {
-    if (phase !== "dealing") { showToast("베팅이 확정되면 카드가 나옵니다"); return; }
-    if (!canSqueeze(side)) {
-      const o = side === "p" ? ownerP : ownerB;
-      showToast(o ? `${names[o] || "상대"} 님이 까는 쪽입니다` : "카드가 나오는 중입니다");
-      return;
-    }
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
-    const d = { side, idx, startX: e.clientX, dx: 0 };
-    drag.current = d;
-    setDragView({ ...d });
-  };
-  const onDragMove = (e) => {
-    const d = drag.current;
-    if (!d) return;
-    d.dx = e.clientX - d.startX;
-    setDragView({ ...d });
-  };
-  const onDragEnd = () => {
-    const d = drag.current;
-    drag.current = null;
-    setDragView(null);
-    if (!d) return;
-    const progress = Math.min(1, Math.abs(d.dx) / DRAG_FULL_PX);
-    if (progress >= 0.5 || Math.abs(d.dx) < 6) squeeze(d.side, d.idx);
-  };
-  const dragTFor = (side, idx, state) => {
-    const d = dragView;
-    if (!d || d.side !== side || d.idx !== idx) return null;
-    return (LEVEL_OF[state] ?? 0) + Math.min(1, Math.abs(d.dx) / DRAG_FULL_PX);
-  };
+  // 내가 깔 수 있는 카드의 실제 앞면 (서버가 담당자에게만 내려줌 → 다른 사람은 열기 전까지 못 봄)
+  const [faces, setFaces] = useState({ round: 0, p: null, b: null });
+  useEffect(() => {
+    if (phase !== "dealing" || !dealAt) { setFaces({ round: 0, p: null, b: null }); return; }
+    let dead = false;
+    myCardsBaccarat(tableId)
+      .then((r) => { if (!dead && r && r.round === round) setFaces({ round: r.round, p: r.p, b: r.b }); })
+      .catch(() => {});
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, dealAt, drawn.p, drawn.b, ownerP, ownerB, tableId]);
+  // 공개된 카드는 모두에게 보이는 값, 아직 안 열린 카드는 내가 담당일 때만 내 앞면
+  const faceOf = (side, i) => (revealV[side][i] || (faces[side] && faces[side][i])) || undefined;
+
   const revealMine = async () => {
     if (!canRevealMine) return;
     playSound("reveal");
@@ -592,7 +725,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   })();
 
   const statusLine = (() => {
-    if (phase === "dealing") return elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : "🎴 카드를 잡고 좌우로 끌어서 열어보세요";
+    if (phase === "dealing") return elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : "🎴 카드를 잡고 원하는 방향으로 끌어서 열어보세요";
     if (committedTotal > 0 && thinking.length) {
       return `⏳ ${thinking.map((u) => names[u] || "플레이어").join(", ")} 님의 베팅 확정을 기다리는 중${secondsLeft !== null ? ` · ${secondsLeft}초` : ""}`;
     }
@@ -674,10 +807,11 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
             {phase === "dealing" && <div style={S.ownerTag}>{ownerLabel("p")}</div>}
             <div style={S.cardsContainer}>
               {pStates.map((st, i) => (
-                <Card3D key={`p${i}`} card={pVals[i] || undefined} state={st} fromX={-60}
-                  dragT={dragTFor("p", i, st)} canDrag={canSqueeze("p") && UNREVEALED_STATES.includes(st)}
-                  onDragStart={onDragStart("p", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
-                  onClick={() => squeeze("p", i)} highlight={fresh && phase === "betting" && lastRes.winner === "player"} />
+                <Card3D key={`p${i}`} state={st} fromX={-60}
+                  card={phase === "dealing" ? faceOf("p", i) : pVals[i]}
+                  interactive={canSqueeze("p") && st === "back" && !!faceOf("p", i)}
+                  onCommit={() => openCard("p", i)}
+                  highlight={fresh && phase === "betting" && lastRes.winner === "player"} />
               ))}
             </div>
             <div style={S.scoreBox}>{displayP}</div>
@@ -688,10 +822,11 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
             {phase === "dealing" && <div style={S.ownerTag}>{ownerLabel("b")}</div>}
             <div style={S.cardsContainer}>
               {bStates.map((st, i) => (
-                <Card3D key={`b${i}`} card={bVals[i] || undefined} state={st} fromX={-230}
-                  dragT={dragTFor("b", i, st)} canDrag={canSqueeze("b") && UNREVEALED_STATES.includes(st)}
-                  onDragStart={onDragStart("b", i)} onDragMove={onDragMove} onDragEnd={onDragEnd}
-                  onClick={() => squeeze("b", i)} highlight={fresh && phase === "betting" && lastRes.winner === "banker"} />
+                <Card3D key={`b${i}`} state={st} fromX={-230}
+                  card={phase === "dealing" ? faceOf("b", i) : bVals[i]}
+                  interactive={canSqueeze("b") && st === "back" && !!faceOf("b", i)}
+                  onCommit={() => openCard("b", i)}
+                  highlight={fresh && phase === "betting" && lastRes.winner === "banker"} />
               ))}
             </div>
             <div style={{ ...S.scoreBox, color: "#E63975", borderColor: "rgba(230,57,117,0.3)" }}>{displayB}</div>
