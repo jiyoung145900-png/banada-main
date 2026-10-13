@@ -269,7 +269,8 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
 
   const { table, loading } = useBaccaratTable(tableId);
   const round = table?.currentRound || 1;
-  const phase = table?.phase || "betting";
+  // 예전 버전의 phase(waiting/result)도 베팅 가능 상태로 취급
+  const phase = table?.phase === "dealing" ? "dealing" : "betting";
   // 접속이 끊긴(하트비트 30초 이상) 플레이어는 목록에서 제외 → 담당/딜러 계산이 막히지 않음
   const players = (table?.players || []).filter(
     (u) => (table?.playerSeen?.[u] || 0) >= serverNowMs() - 30000
