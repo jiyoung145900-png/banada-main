@@ -31,7 +31,7 @@ export const TABLES = [
 ];
 
 export const MIN_BET = 10000;    // 10K
-export const MAX_BET = 1000000;  // 1M
+export const MAX_BET = 100000000; // 1억
 
 // Cloud Function 호출 setup (asia-northeast3)
 const functions = getFunctions(getApp(), "asia-northeast3");
