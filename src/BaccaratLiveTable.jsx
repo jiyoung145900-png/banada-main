@@ -470,6 +470,10 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     setBusy(true);
     try {
       await placeBaccaratBet({ userId, nickname: userName, tableId, bets });
+      // 혼자 있을 때는 확정과 동시에 바로 딜 (여러 명이면 딜러가 DEAL)
+      if (players.length <= 1 && phase === "betting") {
+        await dealBaccarat(tableId);
+      }
       showToast(`베팅 확정 · ${total.toLocaleString()}`);
     } catch (err) {
       showToast(err.message || "베팅 실패");
@@ -770,14 +774,8 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           <div style={{ fontSize: 14, fontWeight: 700 }}>{elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : hasUnrevealed ? "카드를 터치해서 열어보세요 👆" : "마무리 중..."}</div>
         </div>
       )}
-      {mySideOpen("p") && (
-        <button onClick={() => revealMySide("p")} style={S.revealAllBtn}>👁 내 쪽 PLAYER 카드 모두 열기</button>
-      )}
-      {mySideOpen("b") && (
-        <button onClick={() => revealMySide("b")} style={{ ...S.revealAllBtn, marginTop: 6 }}>👁 내 쪽 BANKER 카드 모두 열기</button>
-      )}
       {phase === "dealing" && elapsed >= NATURAL_WAIT && hasUnrevealed && !mySideOpen("p") && !mySideOpen("b") && (
-        <div style={S.squeezeGuide}>카드는 담당 플레이어가 잡고 끌어서 엽니다 (좌우로 끌기)</div>
+        <div style={S.squeezeGuide}>카드를 잡고 좌우로 끌어서 여세요 (살짝 누르면 한 단계씩 열려요)</div>
       )}
     </div>
   );
