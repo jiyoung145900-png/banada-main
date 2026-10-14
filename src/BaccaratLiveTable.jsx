@@ -40,6 +40,8 @@ const chipBg = (v) =>
   : v >= 50000 ? "linear-gradient(135deg, #93C5FD, #1D4ED8)"
   : "linear-gradient(135deg, #86EFAC, #15803D)";
 
+const buzz = (pattern) => { try { if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern); } catch (e) {} };
+
 const injectKeyframes = () => {
   if (document.getElementById("baccarat-animations")) return;
   const style = document.createElement("style");
@@ -56,10 +58,93 @@ const injectKeyframes = () => {
     @keyframes confettiFall { 0% { transform: translateY(-30px) rotate(0deg); opacity: 1; } 100% { transform: translateY(700px) rotate(720deg); opacity: 0; } }
     @keyframes shoeShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px) rotate(-1deg); } 75% { transform: translateX(2px) rotate(1deg); } }
     @keyframes shoeGlow { 0%, 100% { box-shadow: 0 0 12px rgba(212,165,116,0.3), inset 0 2px 4px rgba(0,0,0,0.6); } 50% { box-shadow: 0 0 22px rgba(212,165,116,0.7), inset 0 2px 4px rgba(0,0,0,0.6); } }
+    @keyframes chipDrop { 0% { transform: translateY(-26px) scale(1.7); opacity: 0; } 70% { transform: translateY(2px) scale(0.95); opacity: 1; } 100% { transform: translateY(0) scale(1); opacity: 1; } }
+    @keyframes noMoreBets { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); } }
+    @keyframes resultRise { 0% { opacity: 0; transform: translateY(16px) scale(0.94); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes winArea { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,215,106,0), inset 0 0 0 rgba(255,215,106,0); } 50% { box-shadow: 0 0 22px 2px rgba(255,215,106,0.75), inset 0 0 18px rgba(255,215,106,0.25); } }
     @keyframes toastIn { 0% { opacity: 0; transform: translate(-50%, 10px); } 100% { opacity: 1; transform: translate(-50%, 0); } }
   `;
   document.head.appendChild(style);
 };
+
+// ── 리벳 / 더블 / 카운트업 (순수 함수) ──────────────────────────────
+// 금액 → 칩 목록 (큰 칩부터). 10K 미만은 만들 수 없으므로 무시.
+export function amountToChips(amount) {
+  const out = [];
+  let rest = Math.max(0, Math.floor(amount));
+  for (const v of [...CHIPS].sort((a, b) => b - a)) while (rest >= v) { out.push(v); rest -= v; }
+  return out;
+}
+export const betsToStacks = (bets = {}) => {
+  const s = emptyStacks();
+  for (const k of Object.keys(s)) s[k] = amountToChips(bets[k] || 0);
+  return s;
+};
+export const stacksToBets = (stacks) => {
+  const b = {};
+  for (const k of Object.keys(stacks)) b[k] = stacks[k].reduce((x, y) => x + y, 0);
+  return b;
+};
+export const sumBetValues = (bets = {}) => Object.values(bets).reduce((a, b) => a + (b || 0), 0);
+// 모든 베팅을 두 배로
+export const doubleBets = (bets = {}) => Object.fromEntries(Object.entries(bets).map(([k, v]) => [k, (v || 0) * 2]));
+// 숫자가 올라가는 연출: t(0~1) 에서의 값 (끝에서 부드럽게 멈춤)
+export const countUpValue = (target, t) => Math.round(target * (1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3)));
+
+// ── 카지노 칩 (SVG) ──────────────────────────────────────────────────
+// 가장자리 홈(8개) + 안쪽 점선 링 + 중앙 원. 금액별 색. 선택/놓기 연출에 같은 컴포넌트를 씀.
+const CHIP_THEME = {
+  10000:    { a: "#4ade80", b: "#15803d", ring: "#dcfce7", inner: "#166534", text: "#fff" },
+  50000:    { a: "#60a5fa", b: "#1d4ed8", ring: "#dbeafe", inner: "#1e3a8a", text: "#fff" },
+  100000:   { a: "#f87171", b: "#b91c1c", ring: "#fee2e2", inner: "#7f1d1d", text: "#fff" },
+  500000:   { a: "#c084fc", b: "#7e22ce", ring: "#f3e8ff", inner: "#581c87", text: "#fff" },
+  1000000:  { a: "#fde68a", b: "#b8860b", ring: "#fffbeb", inner: "#78350f", text: "#fff7d6" },
+  5000000:  { a: "#67e8f9", b: "#0e7490", ring: "#cffafe", inner: "#164e63", text: "#fff" },
+  10000000: { a: "#fdba74", b: "#c2410c", ring: "#ffedd5", inner: "#7c2d12", text: "#fff" },
+  50000000: { a: "#f9a8d4", b: "#9d174d", ring: "#fce7f3", inner: "#500724", text: "#fff" },
+};
+const chipThemeOf = (v) => CHIP_THEME[v] || CHIP_THEME[10000];
+
+export function CasinoChip({ value, size = 40, drop = false }) {
+  const t = chipThemeOf(value);
+  const id = `bcChip${value}`;
+  const label = fmtChip(value);
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" data-casino-chip={value}
+      style={{ display: "block", filter: "drop-shadow(0 3px 3px rgba(0,0,0,0.55))", animation: drop ? "chipDrop 0.28s cubic-bezier(.2,.9,.3,1.2)" : "none" }}>
+      <defs>
+        <radialGradient id={id} cx="35%" cy="30%" r="85%"><stop offset="0%" stopColor={t.a} /><stop offset="100%" stopColor={t.b} /></radialGradient>
+      </defs>
+      <circle cx="50" cy="50" r="48" fill={`url(#${id})`} stroke="rgba(0,0,0,0.45)" strokeWidth="1.5" />
+      {Array.from({ length: 8 }).map((_, i) => (
+        <rect key={i} x="43" y="2.5" width="14" height="15" rx="2.5" fill={t.ring} opacity="0.95" transform={`rotate(${i * 45} 50 50)`} />
+      ))}
+      <circle cx="50" cy="50" r="31" fill="none" stroke={t.ring} strokeWidth="2.2" strokeDasharray="6 4.5" opacity="0.9" />
+      <circle cx="50" cy="50" r="26" fill={t.inner} opacity="0.55" />
+      <ellipse cx="38" cy="30" rx="18" ry="9" fill="#fff" opacity="0.16" transform="rotate(-25 38 30)" />
+      <text x="50" y="51" textAnchor="middle" dominantBaseline="central" fontSize={label.length > 3 ? 21 : 26} fontWeight="900" fill={t.text}
+        style={{ fontFamily: "Inter, Arial, sans-serif" }}>{label}</text>
+    </svg>
+  );
+}
+
+// 숫자가 0 에서 목표값까지 올라가는 연출
+export function CountUp({ value, ms = 1100, prefix = "" }) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    let raf = 0, t0 = null;
+    const tick = (now) => {
+      if (t0 === null) t0 = now;
+      const t = (now - t0) / ms;
+      setShown(countUpValue(value, t));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    setShown(0);
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, ms]);
+  return <span data-countup={value}>{prefix}{shown.toLocaleString()}</span>;
+}
 
 // 🎆 폭죽
 function Confetti() {
@@ -77,7 +162,7 @@ function Confetti() {
     []
   );
   return (
-    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 10050, overflow: "hidden" }}>
+    <div data-confetti style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 10050, overflow: "hidden" }}>
       {pieces.map((p) => (
         <div
           key={p.id}
@@ -464,11 +549,14 @@ export function Card3D({ card, state, interactive = false, onCommit, highlight, 
 function PlacedChips({ stack }) {
   if (!stack.length) return null;
   const visible = stack.slice(-3);
+  const base = stack.length - visible.length;
   return (
     <div style={S.placedChips}>
       {stack.length > 3 && <span style={S.extraChipCount}>+{stack.length - 3}</span>}
       {visible.map((v, i) => (
-        <span key={`${i}-${v}`} style={{ ...S.placedChip, background: chipBg(v) }}>{fmtChip(v)}</span>
+        <span key={`${base + i}-${v}`} style={{ marginLeft: i ? -12 : 0, display: "inline-block" }}>
+          <CasinoChip value={v} size={30} drop={i === visible.length - 1} />
+        </span>
       ))}
     </div>
   );
@@ -522,6 +610,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const stats = useMemo(() => computeStats(winners), [winners]);
   const roundBets = useRoundBets(tableId, round);
   const myCommitted = useMyBet(userId, tableId, round);
+  const lastBet = useMyBet(userId, tableId, table?.lastResultRound || 0);   // 방금 끝난 판의 내 베팅 (정산 결과 포함)
 
   // 서버 시각 기준 시계
   const [now, setNow] = useState(serverNowMs());
@@ -549,6 +638,11 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const toastTimer = useRef(null);
   const audioRef = useRef(null);
   const resultInit = useRef(false);
+  const announcedRef = useRef(0);                       // 내 결과를 이미 보여준 라운드
+  const joinedAtRound = useRef(null);                   // 입장 시점의 마지막 결과 라운드 (그 이전 판은 발표 대상 아님)
+  const [myResult, setMyResult] = useState(null);       // { round, net, payout, total }
+  const [sessionNet, setSessionNet] = useState(0);      // 이 테이블에서의 누적 손익
+  const [lastBets, setLastBets] = useState(null);       // 직전에 확정한 베팅 (리벳용)
   const lastSeenResult = useRef(0);
 
   const showToast = (m) => {
@@ -672,6 +766,9 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [naturalReady, dealAt]);
 
+  // 새 판이 딜링을 시작하면 이전 판 결과 패널을 닫음
+  useEffect(() => { if (phase === "dealing") setMyResult(null); }, [phase]);
+
   // 딜링 시작 멘트
   const lastDealVoice = useRef(0);
   useEffect(() => {
@@ -686,17 +783,34 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   useEffect(() => {
     const r = table?.lastResultRound;
     if (!r) return;
-    if (!resultInit.current) { resultInit.current = true; lastSeenResult.current = r; return; }
+    if (!resultInit.current) { resultInit.current = true; lastSeenResult.current = r; joinedAtRound.current = r; return; }
     if (lastSeenResult.current === r) return;
     lastSeenResult.current = r;
     const w = table.lastResult?.winner;
     speakDealer(w === "player" ? "Player wins" : w === "banker" ? "Banker wins" : "Tie");
-    playSound("win");
-    // 내가 이긴 판이면 폭죽: 정산된 내 베팅 기록으로 확인
-    const mine = roundBets.find((b) => b.userId === userId && b.round === r);
-    if (mine && mine.net > 0) { setShowConfetti(true); setTimeout(() => setShowConfetti(false), 3200); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table?.lastResultRound]);
+
+  // 내 결과: 서버가 정산을 마친 내 베팅 기록이 도착하면 한 번만 발표 (이겼을 때만 사운드/폭죽/진동)
+  useEffect(() => {
+    const r = table?.lastResultRound;
+    if (!r || !resultInit.current || !lastBet || lastBet.round !== r || !lastBet.settled) return;
+    if (joinedAtRound.current !== null && r <= joinedAtRound.current) return;   // 입장하기 전에 끝난 판
+    if (announcedRef.current === r) return;
+    announcedRef.current = r;
+    const net = lastBet.net || 0;
+    setMyResult({ round: r, net, payout: lastBet.payout || 0, total: lastBet.totalBet || 0 });
+    setSessionNet((v) => v + net);
+    if (net > 0) {
+      playSound("win");
+      buzz([30, 40, 30, 40, 60]);
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3200);
+    } else if (net < 0) { playSound("peek"); }
+    const id = setTimeout(() => setMyResult((cur) => (cur && cur.round === r ? null : cur)), 9000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastBet, table?.lastResultRound]);
 
   // ── 카드 담당 (서버와 같은 규칙: 자리별 최다 베팅자, 없으면 누구나) ──
   const ownerOf = (k) => {
@@ -758,6 +872,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     if (desiredTotal + selectedChip > MAX_BET) return showToast(`최대 베팅 ${MAX_BET.toLocaleString()}`);
     if (shownPoints < selectedChip) return showToast("포인트가 부족합니다");
     playSound("chip");
+    buzz(8);
     if (desiredTotal === 0 && committedTotal === 0) heartbeatBaccarat(tableId, true); // "칩 만지는 중" 즉시 알림
     setDesired((prev) => ({ ...prev, [target]: [...prev[target], selectedChip] }));
   };
@@ -767,6 +882,26 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
       for (const k of [...AREA_KEYS].reverse()) if (next[k].length) { next[k] = next[k].slice(0, -1); break; }
       return next;
     });
+  };
+  // 리벳: 직전에 확정한 베팅 그대로 다시 올림 (확정은 따로 눌러야 서버에 들어감)
+  const rebet = () => {
+    if (phase !== "betting" || busy || bettingClosed || !lastBets) return;
+    const total = sumBetValues(lastBets);
+    if (total > MAX_BET) return showToast(`최대 베팅 ${MAX_BET.toLocaleString()}`);
+    if (total - committedTotal > gamePoints) return showToast("포인트가 부족합니다");
+    playSound("chip"); buzz(12);
+    if (desiredTotal === 0 && committedTotal === 0) heartbeatBaccarat(tableId, true);
+    setDesired(betsToStacks(lastBets));
+  };
+  // 더블: 지금 올려둔 베팅을 전부 두 배로
+  const doubleDesired = () => {
+    if (phase !== "betting" || busy || bettingClosed || desiredTotal === 0) return;
+    const doubled = doubleBets(stacksToBets(desired));
+    const total = sumBetValues(doubled);
+    if (total > MAX_BET) return showToast(`최대 베팅 ${MAX_BET.toLocaleString()}`);
+    if (total - committedTotal > gamePoints) return showToast("포인트가 부족합니다");
+    playSound("chip"); buzz(12);
+    setDesired(betsToStacks(doubled));
   };
   const clearDesired = () => {
     setDesired(emptyStacks());
@@ -784,6 +919,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     setBusy(true);
     try {
       await placeBaccaratBet({ tableId, bets });
+      setLastBets({ ...bets });
     } catch (err) {
       showToast(err.message || "베팅 실패");
       setBusy(false);
@@ -843,7 +979,8 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   }
 
   const bettingOpen = phase === "betting" && !bettingClosed;
-  const bettorList = roundBets.map((b) => ({ name: b.nickname || "GUEST", total: b.totalBet || 0, mine: b.userId === userId }));
+  // 방금 끝난 판의 당첨 자리 (6초간 강조)
+  const winAreas = fresh && lastRes ? new Set([lastRes.winner, lastRes.sideResults?.playerPair && "playerPair", lastRes.sideResults?.bankerPair && "bankerPair", lastRes.sideResults?.perfectPair && "perfectPair"].filter(Boolean)) : new Set();
 
   return (
     <div style={S.container}>
@@ -858,6 +995,11 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
 
       <div style={S.subHeader}>
         <span style={S.tableTag}><span style={S.liveDot}>●</span> {tableId === "table1" ? "TABLE 1" : "TABLE 2"} · LIVE · {players.length}명</span>
+        {sessionNet !== 0 && (
+          <span data-session style={{ ...S.sessionChip, color: sessionNet > 0 ? "#86EFAC" : "#FCA5A5", borderColor: sessionNet > 0 ? "rgba(134,239,172,0.4)" : "rgba(252,165,165,0.4)" }}>
+            SESSION {sessionNet > 0 ? "+" : "-"}{Math.abs(sessionNet).toLocaleString()}
+          </span>
+        )}
         <div style={{ display: "flex", gap: 6 }}>
           <button onClick={() => { setVoiceOn((v) => !v); setVoiceEnabled(!voiceOn); }} style={S.toggleBtn}>{voiceOn ? "🔊" : "🔇"}</button>
           <button onClick={() => { setBgmOn((v) => !v); setBgmEnabled(!bgmOn); }} style={S.toggleBtn}>{bgmOn ? "🎵" : "🎶"}</button>
@@ -932,6 +1074,10 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           </div>
         </div>
 
+        {phase === "dealing" && elapsed < 1600 && (
+          <div data-nomore style={S.noMoreBets}>NO MORE BETS</div>
+        )}
+
         {fresh && phase === "betting" && (
           <div style={S.resultOverlay}>
             <div style={{ ...S.resultBanner, background: "linear-gradient(90deg, transparent, rgba(0,0,0,0.9), transparent)" }}>
@@ -941,9 +1087,36 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
         )}
       </div>
 
-      {bettorList.length > 0 && (
-        <div style={S.mySummary}>
-          👥 {bettorList.map((b) => `${b.name} ${b.total.toLocaleString()}${b.mine ? " (나)" : ""}`).join(" · ")}
+      {roundBets.length > 0 && (
+        <div style={S.seatRow}>
+          {roundBets.map((b) => {
+            const mine = b.userId === userId;
+            const parts = [["P", b.bets?.player, "#3B82F6"], ["B", b.bets?.banker, "#E63975"], ["T", b.bets?.tie, "#10B981"]].filter((x) => x[1] > 0);
+            return (
+              <div key={b.id || b.userId} data-seat style={{ ...S.seatPill, borderColor: mine ? "rgba(255,215,106,0.7)" : "rgba(255,255,255,0.14)", background: mine ? "rgba(255,215,106,0.1)" : "rgba(255,255,255,0.04)" }}>
+                <span style={{ ...S.seatAvatar, background: mine ? "linear-gradient(135deg,#FFD76A,#B8860B)" : "linear-gradient(135deg,#6B7280,#374151)", color: mine ? "#1b1204" : "#fff" }}>{(b.nickname || "G").slice(0, 1).toUpperCase()}</span>
+                <span style={{ fontWeight: 800, fontSize: 11 }}>{b.nickname || "GUEST"}{mine ? " (나)" : ""}</span>
+                {parts.map(([k, v, c]) => <span key={k} style={{ fontSize: 10, fontWeight: 800, color: c }}>{k} {fmtChip(v)}</span>)}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── 내 결과 (카운트업) ── */}
+      {myResult && phase === "betting" && (
+        <div data-myresult onClick={() => setMyResult(null)} style={{ ...S.myResult, borderColor: myResult.net > 0 ? "#FFD76A" : myResult.net < 0 ? "rgba(252,165,165,0.5)" : "rgba(255,255,255,0.3)",
+          background: myResult.net > 0 ? "linear-gradient(135deg, rgba(255,215,106,0.18), rgba(184,134,11,0.1))" : "rgba(255,255,255,0.05)" }}>
+          <div style={{ fontSize: 30 }}>{myResult.net > 0 ? "🏆" : myResult.net < 0 ? "💸" : "⚖️"}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, letterSpacing: 3, color: "rgba(255,255,255,0.6)", fontWeight: 800 }}>
+              {myResult.net > 0 ? "YOU WON" : myResult.net < 0 ? "BETTER LUCK NEXT" : "PUSH · 원금 반환"}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'Playfair Display', serif", color: myResult.net > 0 ? "#FFD76A" : myResult.net < 0 ? "#FCA5A5" : "#fff" }}>
+              {myResult.net > 0 ? <CountUp value={myResult.net} prefix="+" /> : myResult.net < 0 ? <>-{Math.abs(myResult.net).toLocaleString()}</> : "±0"}
+            </div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)" }}>베팅 {myResult.total.toLocaleString()} → 지급 {myResult.payout.toLocaleString()}</div>
+          </div>
         </div>
       )}
 
@@ -961,25 +1134,29 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
       {phase === "betting" && (
         <div style={S.bettingUI}>
           <div style={S.chipSelector}>
-            {CHIPS.map((v) => (
-              <button key={v} onClick={() => setSelectedChip(v)} disabled={shownPoints < v}
-                style={{ ...S.chipBtn, background: chipBg(v),
-                  border: selectedChip === v ? "3px solid #FFD700" : "3px dashed rgba(255,255,255,0.65)",
-                  boxShadow: selectedChip === v ? "0 0 16px rgba(255,215,0,0.7)" : "0 4px 10px rgba(0,0,0,0.5)",
-                  transform: selectedChip === v ? "translateY(-3px) scale(1.06)" : "none",
-                  opacity: shownPoints < v ? 0.3 : 1 }}>{fmtChip(v)}</button>
-            ))}
+            {CHIPS.map((v) => {
+              const sel = selectedChip === v;
+              const dis = shownPoints < v;
+              return (
+                <button key={v} onClick={() => setSelectedChip(v)} disabled={dis} data-chip-btn={v}
+                  style={{ ...S.chipBtn, opacity: dis ? 0.3 : 1, transform: sel ? "translateY(-5px) scale(1.12)" : "none",
+                    filter: sel ? "drop-shadow(0 0 10px rgba(255,215,0,0.85))" : "none", transition: "all 0.18s" }}>
+                  <CasinoChip value={v} size={46} />
+                  {sel && <span style={S.chipSelRing} />}
+                </button>
+              );
+            })}
           </div>
 
           <div style={S.boardAreas}>
-            <AreaBox label="PLAYER" sub="1 : 1" color="#3B82F6" mine={desired.player} other={serverArea.player} onClick={() => placeChip("player")} disabled={!bettingOpen} />
-            <AreaBox label="TIE" sub="8 : 1" color="#10B981" mine={desired.tie} other={serverArea.tie} onClick={() => placeChip("tie")} disabled={!bettingOpen} />
-            <AreaBox label="BANKER" sub="0.95 : 1" color="#E63975" mine={desired.banker} other={serverArea.banker} onClick={() => placeChip("banker")} disabled={!bettingOpen} />
+            <AreaBox label="PLAYER" sub="1 : 1" color="#3B82F6" mine={desired.player} other={serverArea.player} onClick={() => placeChip("player")} disabled={!bettingOpen} win={winAreas.has("player")} />
+            <AreaBox label="TIE" sub="8 : 1" color="#10B981" mine={desired.tie} other={serverArea.tie} onClick={() => placeChip("tie")} disabled={!bettingOpen} win={winAreas.has("tie")} />
+            <AreaBox label="BANKER" sub="0.95 : 1" color="#E63975" mine={desired.banker} other={serverArea.banker} onClick={() => placeChip("banker")} disabled={!bettingOpen} win={winAreas.has("banker")} />
           </div>
           <div style={S.boardAreas}>
-            <AreaBox compact label="P PAIR" sub="11 : 1" color="#60A5FA" mine={desired.playerPair} other={serverArea.playerPair} onClick={() => placeChip("playerPair")} disabled={!bettingOpen} />
-            <AreaBox compact label="PERFECT" sub="25 : 1" color="#D4A574" mine={desired.perfectPair} other={serverArea.perfectPair} onClick={() => placeChip("perfectPair")} disabled={!bettingOpen} />
-            <AreaBox compact label="B PAIR" sub="11 : 1" color="#F472B6" mine={desired.bankerPair} other={serverArea.bankerPair} onClick={() => placeChip("bankerPair")} disabled={!bettingOpen} />
+            <AreaBox compact label="P PAIR" sub="11 : 1" color="#60A5FA" mine={desired.playerPair} other={serverArea.playerPair} onClick={() => placeChip("playerPair")} disabled={!bettingOpen} win={winAreas.has("playerPair")} />
+            <AreaBox compact label="PERFECT" sub="25 : 1" color="#D4A574" mine={desired.perfectPair} other={serverArea.perfectPair} onClick={() => placeChip("perfectPair")} disabled={!bettingOpen} win={winAreas.has("perfectPair")} />
+            <AreaBox compact label="B PAIR" sub="11 : 1" color="#F472B6" mine={desired.bankerPair} other={serverArea.bankerPair} onClick={() => placeChip("bankerPair")} disabled={!bettingOpen} win={winAreas.has("bankerPair")} />
           </div>
 
           <div style={S.infoLine}>
@@ -989,8 +1166,12 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           </div>
 
           <div style={S.chipControls}>
-            <button onClick={removeLastChip} disabled={desiredTotal === 0} style={{ ...S.chipControlBtn, background: "linear-gradient(135deg, #6B7280, #4B5563)", opacity: desiredTotal === 0 ? 0.4 : 1 }}>↩ 마지막 칩 취소</button>
-            <button onClick={clearDesired} disabled={desiredTotal === 0} style={{ ...S.chipControlBtn, background: "linear-gradient(135deg, #DC2626, #991B1B)", opacity: desiredTotal === 0 ? 0.4 : 1 }}>🗑 전체 리셋</button>
+            <button onClick={removeLastChip} disabled={desiredTotal === 0} data-act="undo" style={{ ...S.chipControlBtn, background: "linear-gradient(135deg, #6B7280, #4B5563)", opacity: desiredTotal === 0 ? 0.4 : 1 }}>↩ 마지막 칩 취소</button>
+            <button onClick={clearDesired} disabled={desiredTotal === 0} data-act="clear" style={{ ...S.chipControlBtn, background: "linear-gradient(135deg, #DC2626, #991B1B)", opacity: desiredTotal === 0 ? 0.4 : 1 }}>🗑 전체 리셋</button>
+          </div>
+          <div style={S.chipControls}>
+            <button onClick={rebet} disabled={!lastBets || busy || bettingClosed} data-act="rebet" style={{ ...S.chipControlBtn, background: "linear-gradient(135deg, #0EA5E9, #0369A1)", opacity: !lastBets || busy || bettingClosed ? 0.4 : 1 }}>⟲ REBET{lastBets ? ` ${fmtChip(sumBetValues(lastBets))}` : ""}</button>
+            <button onClick={doubleDesired} disabled={desiredTotal === 0 || busy || bettingClosed} data-act="double" style={{ ...S.chipControlBtn, background: "linear-gradient(135deg, #D4A574, #B07D46)", color: "#1b1204", opacity: desiredTotal === 0 || busy || bettingClosed ? 0.4 : 1 }}>×2 DOUBLE</button>
           </div>
 
           <button onClick={confirmBet} disabled={busy || !bettingOpen || mainDesired === 0 || desiredTotal === committedTotal}
@@ -1011,12 +1192,13 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
 }
 
 // 베팅 영역 (내 작성분 + 다른 플레이어 확정분)
-function AreaBox({ label, sub, color, mine, other, onClick, disabled, compact }) {
+function AreaBox({ label, sub, color, mine, other, onClick, disabled, compact, win }) {
   const m = sum(mine);
   const total = m + (other || 0);
   return (
-    <button onClick={onClick} disabled={disabled} style={{ ...S.betArea, minHeight: compact ? 84 : 124, opacity: disabled ? 0.6 : 1,
-      borderColor: total > 0 ? color : "rgba(255,255,255,0.1)", background: total > 0 ? `${color}1f` : "rgba(255,255,255,0.03)" }}>
+    <button onClick={onClick} disabled={disabled} data-area-win={win ? "1" : "0"} style={{ ...S.betArea, minHeight: compact ? 84 : 124, opacity: disabled ? 0.6 : 1,
+      borderColor: win ? "#FFD76A" : total > 0 ? color : "rgba(255,255,255,0.1)", background: total > 0 ? `${color}1f` : "rgba(255,255,255,0.03)",
+      animation: win ? "winArea 1.1s ease-in-out infinite" : "none" }}>
       <span style={{ color, fontWeight: 900, fontSize: compact ? 11 : 14, letterSpacing: 1 }}>{label}</span>
       <span style={S.betAreaSub}>{sub}</span>
       <PlacedChips stack={mine} />
@@ -1080,7 +1262,7 @@ const S = {
 
   bettingUI: { background: "rgba(255,255,255,0.02)", borderRadius: 20, padding: 12 },
   chipSelector: { display: "flex", gap: 7, justifyContent: "center", flexWrap: "wrap", marginBottom: 12 },
-  chipBtn: { width: 46, height: 46, borderRadius: "50%", color: "#17120A", fontWeight: 900, fontSize: 10, cursor: "pointer", transition: "all 0.2s" },
+  chipBtn: { position: "relative", width: 46, height: 46, padding: 0, background: "transparent", border: "none", borderRadius: "50%", cursor: "pointer" },
   boardAreas: { display: "flex", gap: 6, marginBottom: 8 },
   betArea: { flex: 1, minWidth: 0, padding: "10px 4px", border: "2px solid rgba(255,255,255,0.1)", borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", gap: 2, cursor: "pointer", transition: "all 0.2s", color: "#fff" },
   betAreaSub: { fontSize: 9, color: "rgba(255,255,255,0.5)", letterSpacing: 1 },
@@ -1089,6 +1271,13 @@ const S = {
   extraChipCount: { color: "#fff", fontSize: 9, fontWeight: 800 },
   placedAmount: { fontSize: 11, color: "#F5E9D2", fontWeight: 800, marginTop: 4 },
   infoLine: { textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.6)", margin: "8px 0" },
+  sessionChip: { fontSize: 10, fontWeight: 900, letterSpacing: 1.2, padding: "3px 10px", borderRadius: 12, border: "1px solid", background: "rgba(0,0,0,0.35)" },
+  noMoreBets: { position: "absolute", top: "50%", left: "50%", zIndex: 30, fontSize: 24, fontWeight: 900, letterSpacing: 5, color: "#fff", padding: "10px 24px", borderRadius: 14, background: "linear-gradient(135deg, rgba(220,38,38,0.92), rgba(127,29,29,0.92))", border: "1.5px solid rgba(255,255,255,0.5)", boxShadow: "0 10px 36px rgba(220,38,38,0.5)", animation: "noMoreBets 1.6s ease-out forwards", pointerEvents: "none", whiteSpace: "nowrap", fontFamily: "'Playfair Display', serif" },
+  seatRow: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 },
+  seatPill: { display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px 4px 4px", borderRadius: 20, border: "1px solid" },
+  seatAvatar: { width: 22, height: 22, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 },
+  myResult: { display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderRadius: 18, border: "1.5px solid", marginBottom: 12, cursor: "pointer", animation: "resultRise 0.45s ease-out" },
+  chipSelRing: { position: "absolute", inset: -3, borderRadius: "50%", border: "2px solid #FFD76A", pointerEvents: "none" },
   chipControls: { display: "flex", gap: 8, marginBottom: 6 },
   chipControlBtn: { flex: 1, height: 42, fontSize: 12, fontWeight: 800, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", boxShadow: "0 4px 10px rgba(0,0,0,0.3)" },
   actionBtn: { width: "100%", padding: 18, background: "linear-gradient(135deg, #D4A574, #B07D46)", border: "none", color: "#000", borderRadius: 16, fontSize: 15, fontWeight: 900, letterSpacing: 2, cursor: "pointer", boxShadow: "0 8px 20px rgba(212,165,116,0.3)" },
