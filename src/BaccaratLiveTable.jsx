@@ -104,36 +104,142 @@ function handScore(hand) {
   return hand.reduce((s, c) => s + cardScore(c), 0) % 10;
 }
 
-const PIP_LAYOUTS = {
-  A: [[50, 50]],
-  "2": [[18, 50], [82, 50, true]],
-  "3": [[18, 50], [50, 50], [82, 50, true]],
-  "4": [[18, 28], [18, 72], [82, 28, true], [82, 72, true]],
-  "5": [[18, 28], [18, 72], [50, 50], [82, 28, true], [82, 72, true]],
-  "6": [[18, 28], [18, 72], [50, 28], [50, 72], [82, 28, true], [82, 72, true]],
-  "7": [[18, 28], [18, 72], [34, 50], [50, 28], [50, 72], [82, 28, true], [82, 72, true]],
-  "8": [[18, 28], [18, 72], [34, 50], [50, 28], [50, 72], [66, 50, true], [82, 28, true], [82, 72, true]],
-  "9": [[18, 28], [18, 72], [38, 28], [38, 72], [50, 50], [62, 28, true], [62, 72, true], [82, 28, true], [82, 72, true]],
-  "10": [[18, 28], [18, 72], [32, 50], [44, 28], [44, 72], [56, 28, true], [56, 72, true], [68, 50, true], [82, 28, true], [82, 72, true]],
+// ── 카드 앞면 (벡터) ──────────────────────────────────────────────────
+// 무늬/숫자/그림을 전부 SVG 로 그려서 기기·글꼴에 상관없이 똑같이 보이고, 확대해도 선명함.
+// 표준 트럼프 배치: 왼쪽 위 숫자+무늬, 오른쪽 아래는 거꾸로, 아래쪽 무늬는 뒤집어 그림.
+const FACE_RED = "#D41F26";
+const FACE_BLACK = "#14141A";
+const COURT_GOLD = "#E3B23C";
+const COURT_SKIN = "#F6D7B8";
+const COURT_INK = "#1B1B1F";
+
+// 무늬 모양 (24x24 안에 그린 윤곽)
+function SuitShape({ suit, x, y, size, flip = false, color, pip = false }) {
+  const k = size / 24;
+  return (
+    <g
+      transform={`translate(${x} ${y}) rotate(${flip ? 180 : 0}) scale(${k}) translate(-12 -12)`}
+      fill={color}
+      {...(pip ? { "data-pip": suit, "data-flip": flip ? "1" : "0" } : {})}
+    >
+      {suit === "♥" && <path d="M12 22 C12 22 2 15.2 2 8.4 C2 5 4.5 2.6 7.6 2.6 C9.6 2.6 11.2 3.7 12 5.4 C12.8 3.7 14.4 2.6 16.4 2.6 C19.5 2.6 22 5 22 8.4 C22 15.2 12 22 12 22 Z" />}
+      {suit === "♦" && <path d="M12 1 L21.5 12 L12 23 L2.5 12 Z" />}
+      {suit === "♠" && <path d="M12 1.5 C12 1.5 2 9.2 2 14.6 C2 17.6 4.5 19.4 7.2 19.4 C8.9 19.4 10.4 18.7 11.3 17.4 C11.2 19.8 10.3 21.4 8.3 22.6 L15.7 22.6 C13.7 21.4 12.8 19.8 12.7 17.4 C13.6 18.7 15.1 19.4 16.8 19.4 C19.5 19.4 22 17.6 22 14.6 C22 9.2 12 1.5 12 1.5 Z" />}
+      {suit === "♣" && (
+        <>
+          <circle cx="12" cy="7.2" r="5.2" />
+          <circle cx="6.2" cy="15.2" r="5.2" />
+          <circle cx="17.8" cy="15.2" r="5.2" />
+          <path d="M12 12 C12.2 17.5 10.8 20.6 8.2 22.8 L15.8 22.8 C13.2 20.6 11.8 17.5 12 12 Z" />
+        </>
+      )}
+    </g>
+  );
+}
+
+// 숫자 카드 무늬 배치 (100x140 카드 기준). 세 번째 값 1 = 뒤집어 그림(아래쪽 절반)
+const PL = 31, PC = 50, PR = 69;
+const PIP_POS = {
+  A: [[PC, 70]],
+  "2": [[PC, 28], [PC, 112, 1]],
+  "3": [[PC, 28], [PC, 70], [PC, 112, 1]],
+  "4": [[PL, 28], [PR, 28], [PL, 112, 1], [PR, 112, 1]],
+  "5": [[PL, 28], [PR, 28], [PC, 70], [PL, 112, 1], [PR, 112, 1]],
+  "6": [[PL, 28], [PR, 28], [PL, 70], [PR, 70], [PL, 112, 1], [PR, 112, 1]],
+  "7": [[PL, 28], [PR, 28], [PC, 49], [PL, 70], [PR, 70], [PL, 112, 1], [PR, 112, 1]],
+  "8": [[PL, 28], [PR, 28], [PC, 49], [PL, 70], [PR, 70], [PC, 91, 1], [PL, 112, 1], [PR, 112, 1]],
+  "9": [[PL, 28], [PR, 28], [PL, 56], [PR, 56], [PC, 70], [PL, 84, 1], [PR, 84, 1], [PL, 112, 1], [PR, 112, 1]],
+  "10": [[PL, 28], [PR, 28], [PC, 42], [PL, 56], [PR, 56], [PL, 84, 1], [PR, 84, 1], [PC, 98, 1], [PL, 112, 1], [PR, 112, 1]],
 };
 
-function CardCenter({ rank, suit, isRed }) {
-  if (!rank || !suit) return null;
-  const color = isRed ? "#E63975" : "#1F0817";
-  if (["J", "Q", "K"].includes(rank))
-    return <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", fontSize: 30, fontWeight: 900, fontFamily: "serif", color }}>{rank}</div>;
-  if (rank === "A")
-    return <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", fontSize: 30 }}>{suit}</div>;
-  const pips = PIP_LAYOUTS[rank];
-  if (!pips) return null;
+// 그림 카드(J/Q/K) 위쪽 절반 인물 (아래쪽은 180° 돌려서 한 번 더 그림). 직접 그린 오리지널 디자인.
+// 프레임(x 17~83, y 15~125)을 꽉 채우도록 크게 그리고, 가운데(y=70)에서 몸통이 자연스럽게 이어짐.
+function CourtHalf({ rank, suit, robe }) {
   return (
-    <>
-      {pips.map(([top, left, flipped], i) => (
-        <div key={i} style={{ position: "absolute", top: `${top}%`, left: `${left}%`, transform: `translate(-50%, -50%) ${flipped ? "rotate(180deg)" : ""}`, fontSize: 12, lineHeight: 1, fontWeight: 900 }}>
-          {suit}
-        </div>
-      ))}
-    </>
+    <g transform="translate(54 0) scale(0.84 1) translate(-50 0)">
+      {/* 몸통: 가운데에서 폭이 가장 넓게 */}
+      <path d="M19 70 L22 62 Q26 54 36 52 L64 52 Q74 54 78 62 L81 70 Z" fill={robe} stroke={COURT_INK} strokeWidth="0.9" />
+      <path d="M22 62 Q26 54 36 52 L64 52 Q74 54 78 62" fill="none" stroke={COURT_GOLD} strokeWidth="2.6" />
+      <path d="M19.5 69 L80.5 69" stroke={COURT_GOLD} strokeWidth="2.4" />
+      <path d="M40 53 L50 64 L60 53" fill="none" stroke={COURT_GOLD} strokeWidth="2" />
+      <SuitShape suit={suit} x={50} y={65} size={10} color={COURT_GOLD} />
+      <SuitShape suit={suit} x={29} y={63} size={7} color={COURT_GOLD} />
+      <SuitShape suit={suit} x={71} y={63} size={7} color={COURT_GOLD} />
+      {/* 목 + 얼굴 (프레임 크기에 맞게 크게) */}
+      <path d="M44 44 Q44 52 40 54 L60 54 Q56 52 56 44 Z" fill={COURT_SKIN} stroke={COURT_INK} strokeWidth="0.8" />
+      <circle cx="50" cy="35" r="13" fill={COURT_SKIN} stroke={COURT_INK} strokeWidth="1" />
+      {/* 머리/수염 */}
+      {rank === "K" && <path d="M37.2 38 Q37.6 54 50 57.5 Q62.4 54 62.8 38 Q57 47 50 47 Q43 47 37.2 38 Z" fill="#EFEFEF" stroke={COURT_INK} strokeWidth="0.8" />}
+      {rank === "Q" && <path d="M36.6 34 Q36.2 20 50 20 Q63.8 20 63.4 34 L67 52 Q61 46 60.5 37 Q50 31.5 39.5 37 Q39 46 33 52 Z" fill="#6B3F1D" stroke={COURT_INK} strokeWidth="0.8" />}
+      {rank === "J" && <path d="M37 33 Q37.6 21.5 50 21.5 Q62.4 21.5 63 33 Q57 27.5 50 28.8 Q43 27.5 37 33 Z" fill="#2B1B10" stroke={COURT_INK} strokeWidth="0.8" />}
+      {/* 눈/입 */}
+      <circle cx="44.6" cy="35.4" r="1.4" fill={COURT_INK} />
+      <circle cx="55.4" cy="35.4" r="1.4" fill={COURT_INK} />
+      <path d="M41.8 32 Q44.6 30.6 47.4 32" fill="none" stroke={COURT_INK} strokeWidth="0.9" strokeLinecap="round" />
+      <path d="M52.6 32 Q55.4 30.6 58.2 32" fill="none" stroke={COURT_INK} strokeWidth="0.9" strokeLinecap="round" />
+      {rank !== "K" && <path d="M46 41.2 Q50 44 54 41.2" fill="none" stroke="#8B3A3A" strokeWidth="1.1" strokeLinecap="round" />}
+      {rank === "K" && <path d="M45 41.5 Q50 39.5 55 41.5" fill="none" stroke="#C9C9C9" strokeWidth="1.4" strokeLinecap="round" />}
+      {/* 왕관 / 모자 */}
+      {rank === "K" && (
+        <>
+          <polygon points="36.5,26 35,14.5 42.5,20.5 50,12 57.5,20.5 65,14.5 63.5,26" fill={COURT_GOLD} stroke={COURT_INK} strokeWidth="1" />
+          <circle cx="50" cy="19.5" r="2" fill={FACE_RED} />
+          <circle cx="40" cy="22.2" r="1.2" fill="#2B4C9B" />
+          <circle cx="60" cy="22.2" r="1.2" fill="#2B4C9B" />
+        </>
+      )}
+      {rank === "Q" && (
+        <>
+          <polygon points="38,27 36.5,18 43,22.5 50,13.5 57,22.5 63.5,18 62,27" fill={COURT_GOLD} stroke={COURT_INK} strokeWidth="1" />
+          <circle cx="50" cy="18.8" r="1.9" fill={FACE_RED} />
+          <circle cx="43.2" cy="24.2" r="1.3" fill="#2B4C9B" />
+          <circle cx="56.8" cy="24.2" r="1.3" fill="#2B4C9B" />
+        </>
+      )}
+      {rank === "J" && (
+        <>
+          <path d="M36.2 28 Q38.5 14.5 52 14.5 Q64 14.5 63.8 28 Z" fill={robe} stroke={COURT_INK} strokeWidth="1" />
+          <path d="M35.6 28 L64.4 28" stroke={COURT_GOLD} strokeWidth="2.2" />
+          <path d="M60 19 Q75 11 71 29" fill="none" stroke={COURT_GOLD} strokeWidth="2.6" strokeLinecap="round" />
+        </>
+      )}
+    </g>
+  );
+}
+
+// 카드 한 장의 앞면 (rank: A,2..10,J,Q,K / suit: ♠♥♦♣)
+export function PlayingCardFace({ rank, suit }) {
+  if (!rank || !suit) return null;
+  const red = suit === "♥" || suit === "♦";
+  const color = red ? FACE_RED : FACE_BLACK;
+  const robe = red ? "#C8102E" : "#24418F";
+  const court = rank === "J" || rank === "Q" || rank === "K";
+  const idx = (
+    <g fill={color}>
+      <text
+        x="11" y="19" fontSize={rank === "10" ? 15 : 18} fontWeight="700"
+        fontFamily="Georgia, 'Times New Roman', serif" textAnchor="middle"
+        {...(rank === "10" ? { textLength: 14, lengthAdjust: "spacingAndGlyphs" } : {})}
+      >{rank}</text>
+      <SuitShape suit={suit} x={11} y={30} size={11} color={color} />
+    </g>
+  );
+  return (
+    <svg viewBox="0 0 100 140" width="100%" height="100%" style={{ display: "block" }} data-face={`${rank}${suit}`}>
+      {idx}
+      <g transform="rotate(180 50 70)">{idx}</g>
+      {court ? (
+        <g data-court={rank}>
+          <rect x="22" y="12" width="64" height="116" rx="2.5" fill="#FFFBEF" stroke={color} strokeWidth="1.2" />
+          <CourtHalf rank={rank} suit={suit} robe={robe} />
+          <g transform="rotate(180 54 70)"><CourtHalf rank={rank} suit={suit} robe={robe} /></g>
+        </g>
+      ) : (
+        (PIP_POS[rank] || []).map(([x, y, flip], i) => (
+          <SuitShape key={i} suit={suit} x={x} y={y} size={rank === "A" ? 46 : 22} flip={!!flip} color={color} pip />
+        ))
+      )}
+    </svg>
   );
 }
 
@@ -292,7 +398,6 @@ export function Card3D({ card, state, interactive = false, onCommit, highlight, 
 
   if (state === "empty") return <div style={{ width: CARD_W, height: CARD_H, margin: "0 3px" }} />;
 
-  const isRed = card?.suit === "♥" || card?.suit === "♦";
   const isOpen = state === "revealed" || localOpen;
   const folding = !!fold && fold.s > 0.5;
   const clip = isOpen ? OPEN_POLY : folding ? toClip(coverPolygon(fold.A, fold.n, fold.s)) : FULL_POLY;
@@ -318,7 +423,7 @@ export function Card3D({ card, state, interactive = false, onCommit, highlight, 
 
       <div
         style={{
-          position: "relative", width: "100%", height: "100%", borderRadius: 8,
+          position: "relative", width: "100%", height: "100%", borderRadius: 6,
           transformOrigin: "center",
           transform: pressed ? `scale(${SQUEEZE_SCALE}) rotate(${tilt}deg)` : "none",
           transition: pressed ? "transform 0.12s ease-out" : "transform 0.22s ease-in",
@@ -327,22 +432,16 @@ export function Card3D({ card, state, interactive = false, onCommit, highlight, 
             : highlight ? "0 0 20px rgba(255,215,0,0.8), 0 8px 20px rgba(0,0,0,0.6)" : "0 8px 20px rgba(0,0,0,0.6)",
         }}
       >
-        {/* 앞면 */}
-        <div style={{ position: "absolute", inset: 0, borderRadius: 8, background: "linear-gradient(145deg, #ffffff, #f0f0f0)", color: isRed ? "#E63975" : "#1F0817", overflow: "hidden" }}>
-          <div style={{ position: "absolute", top: 4, left: 5, fontSize: 13, lineHeight: 1, textAlign: "center", fontFamily: "serif" }}>
-            <div style={{ fontWeight: 900 }}>{card?.rank}</div><div style={{ fontSize: 11 }}>{card?.suit}</div>
-          </div>
-          <CardCenter rank={card?.rank} suit={card?.suit} isRed={isRed} />
-          <div style={{ position: "absolute", bottom: 4, right: 5, fontSize: 13, lineHeight: 1, transform: "rotate(180deg)", textAlign: "center", fontFamily: "serif" }}>
-            <div style={{ fontWeight: 900 }}>{card?.rank}</div><div style={{ fontSize: 11 }}>{card?.suit}</div>
-          </div>
+        {/* 앞면 (벡터 트럼프) */}
+        <div style={{ position: "absolute", inset: 0, borderRadius: 6, background: "#FFFFFF", border: "1px solid #1D1D22", boxSizing: "border-box", overflow: "hidden" }}>
+          {card ? <PlayingCardFace rank={card.rank} suit={card.suit} /> : null}
         </div>
         {/* 뒷면: 접힌 만큼 잘려 나감 (자른 모서리에 그림자) */}
         <div style={{ position: "absolute", inset: 0, filter: folding ? "drop-shadow(0 3px 5px rgba(0,0,0,0.55))" : "none" }}>
           <div
             data-cover={clip}
             style={{
-              position: "absolute", inset: 0, borderRadius: 8,
+              position: "absolute", inset: 0, borderRadius: 6,
               background: "linear-gradient(135deg, #4A1033 0%, #2A0520 50%, #1A0512 100%)",
               border: "2px solid #D4A574", boxSizing: "border-box",
               display: "flex", alignItems: "center", justifyContent: "center",
