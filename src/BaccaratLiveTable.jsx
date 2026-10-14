@@ -606,7 +606,9 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const phase = table?.phase === "dealing" ? "dealing" : "betting";
   const names = table?.names || {};
   const history = useBaccaratHistory(tableId, 80);
-  const winners = useMemo(() => history.map((h) => h.winner), [history]);
+  // 중국점/통계는 현재 슈의 기록만 사용 (새 슈를 섞으면 처음부터). 슈 정보가 없던 옛 기록은 슈 0 으로 취급
+  const shoeNo = table?.shoeNo || 0;
+  const winners = useMemo(() => history.filter((h) => (h.shoeNo || 0) === shoeNo).map((h) => h.winner), [history, shoeNo]);
   const stats = useMemo(() => computeStats(winners), [winners]);
   const roundBets = useRoundBets(tableId, round);
   const myCommitted = useMyBet(userId, tableId, round);
@@ -702,6 +704,19 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const secondsLeft = endsAt ? Math.max(0, Math.ceil((endsAt - now) / 1000)) : null;
   const bettingClosed = !!endsAt && now >= endsAt;
 
+  // ── 슈(8덱) 상태 ──
+  const SHOE_TOTAL = 416;
+  const shoePos = table?.shoePos || 0, shoeCut = table?.shoeCut || 0, shoeHands = table?.shoeHands || 0;
+  const shoeBurn = table?.shoeBurn || null;
+  const shuffleUntil = table?.shuffleUntil || 0;
+  // 결과 연출(약 5.5초)이 끝난 뒤부터 셔플 안내를 보여줌. 베팅은 셔플이 끝날 때까지 막힘
+  const shuffling = shuffleUntil > 0 && now < shuffleUntil;
+  const showShuffle = shuffling && now - (table?.lastActionAt || 0) > 5500;
+  const shuffleLeft = shuffling ? Math.max(0, Math.ceil((shuffleUntil - now) / 1000)) : 0;
+  const lastHandOfShoe = shoeNo > 0 && shoePos >= shoeCut;          // 컷카드를 넘긴 판 = 이 슈의 마지막 판
+  const cardsUntilCut = Math.max(0, shoeCut - shoePos);
+  const cardsLeft = Math.max(0, SHOE_TOTAL - shoePos);
+
   // ── 입장 / 하트비트 / 퇴장 ──
   const engagedRef = useRef(false);
   engagedRef.current = desiredTotal > 0 || committedTotal > 0;
@@ -765,6 +780,20 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     naturalBaccarat(tableId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [naturalReady, dealAt]);
+
+  // 새 슈 알림: 입장한 뒤 슈 번호가 올라가면 안내
+  const seenShoe = useRef(null);
+  useEffect(() => {
+    if (!table) return;
+    const no = table.shoeNo || 0;
+    if (seenShoe.current === null) { seenShoe.current = no; return; }
+    if (no > seenShoe.current) {
+      seenShoe.current = no;
+      showToast(`🔀 새 슈 #${no} · 카드를 섞습니다 (중국점 초기화)`);
+      speakDealer("Shuffling. New shoe.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table?.shoeNo]);
 
   // 새 판이 딜링을 시작하면 이전 판 결과 패널을 닫음
   useEffect(() => { if (phase === "dealing") setMyResult(null); }, [phase]);
@@ -953,6 +982,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const roundLabel = `${tableId === "table1" ? "T1" : "T2"}-#${round}`;
 
   const dealerMessage = (() => {
+    if (shuffling && phase === "betting" && showShuffle) return "SHUFFLING...";
     if (phase === "dealing") return hasUnrevealed ? "SQUEEZE YOUR CARDS!" : "DEALING...";
     if (committedTotal > 0) return thinking.length ? "WAITING FOR OTHERS" : "BET PLACED";
     if (fresh) return lastRes.winner === "player" ? "PLAYER WINS" : lastRes.winner === "banker" ? "BANKER WINS" : "TIE";
@@ -960,6 +990,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   })();
 
   const statusLine = (() => {
+    if (shuffling && phase === "betting") return `🔀 새 슈를 섞는 중 · ${shuffleLeft}초 뒤 베팅할 수 있어요`;
     if (phase === "dealing") return elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : "🎴 카드를 잡고 원하는 방향으로 끌어서 열어보세요";
     if (committedTotal > 0 && thinking.length) {
       return `⏳ ${thinking.map((u) => names[u] || "플레이어").join(", ")} 님의 베팅 확정을 기다리는 중${secondsLeft !== null ? ` · ${secondsLeft}초` : ""}`;
@@ -978,7 +1009,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     );
   }
 
-  const bettingOpen = phase === "betting" && !bettingClosed;
+  const bettingOpen = phase === "betting" && !bettingClosed && !shuffling;
   // 방금 끝난 판의 당첨 자리 (6초간 강조)
   const winAreas = fresh && lastRes ? new Set([lastRes.winner, lastRes.sideResults?.playerPair && "playerPair", lastRes.sideResults?.bankerPair && "bankerPair", lastRes.sideResults?.perfectPair && "perfectPair"].filter(Boolean)) : new Set();
 
@@ -1023,22 +1054,40 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
         </div>
       )}
 
+      {shoeNo > 0 && (
+        <div data-shoe style={S.shoeBar}>
+          <div style={S.shoeBarTop}>
+            <span style={{ fontWeight: 900, letterSpacing: 1.5, color: "#D4A574" }}>SHOE #{shoeNo}</span>
+            <span>HAND {shoeHands}</span>
+            <span data-shoe-left>{lastHandOfShoe ? <b style={{ color: "#FCA5A5" }}>LAST HAND · 이 판이 끝나면 새 슈</b> : `컷카드까지 ${cardsUntilCut}장`}</span>
+          </div>
+          <div style={S.shoeTrack}>
+            <div style={{ ...S.shoeFill, width: `${Math.min(100, (shoePos / SHOE_TOTAL) * 100)}%`, background: lastHandOfShoe ? "linear-gradient(90deg,#DC2626,#F87171)" : "linear-gradient(90deg,#B07D46,#E3B23C)" }} />
+            <div title="컷카드" style={{ ...S.shoeCutMark, left: `${(shoeCut / SHOE_TOTAL) * 100}%` }} />
+          </div>
+          <div style={S.shoeBarBottom}>
+            <span>8덱 {SHOE_TOTAL}장 · 남은 카드 {cardsLeft}장</span>
+            {shoeBurn && <span data-burn>🔥 번 카드 {shoeBurn.rank}{shoeBurn.suit} · {shoeBurn.count}장 소각</span>}
+          </div>
+        </div>
+      )}
+
       <div style={S.roadmapWrap}>
         <div style={S.roadmapHeader}>
-          <span style={S.roadmapHeaderTitle}>🀄 중국매 · ROADMAP</span>
+          <span style={S.roadmapHeaderTitle}>🀄 중국매 · ROADMAP{shoeNo > 0 ? ` · SHOE #${shoeNo}` : ""}</span>
           <button onClick={() => setShowRoadmap((v) => !v)} style={S.roadmapToggleBtn}>{showRoadmap ? "접기 ▲" : "펼치기 ▼"}</button>
         </div>
-        {showRoadmap && (winners.length ? <BaccaratRoadmap history={winners} /> : <div style={S.roadmapEmpty}>첫 라운드 결과가 나오면 로드맵이 쌓입니다</div>)}
+        {showRoadmap && (winners.length ? <BaccaratRoadmap history={winners} /> : <div style={S.roadmapEmpty}>{shoeNo > 1 ? "새 슈가 시작됐어요 · 첫 결과가 나오면 로드맵이 쌓입니다" : "첫 라운드 결과가 나오면 로드맵이 쌓입니다"}</div>)}
       </div>
 
       <div style={S.tableArea}>
-        <div style={{ ...S.shoe, animation: phase === "dealing" && elapsed < 2200 ? "shoeShake 0.5s ease-in-out infinite" : "none" }}>
+        <div style={{ ...S.shoe, animation: (phase === "dealing" && elapsed < 2200) || showShuffle ? "shoeShake 0.5s ease-in-out infinite" : "none" }}>
           <div style={S.shoeLabel}>SHOE</div>
           <div style={S.shoeBox}>
             <div style={S.shoeCards}>
               <div style={S.shoeCard} /><div style={{ ...S.shoeCard, marginTop: -44 }} /><div style={{ ...S.shoeCard, marginTop: -44 }} />
             </div>
-            <div style={S.shoeDeckCount}>6 DECKS</div>
+            <div style={S.shoeDeckCount}>8 DECKS</div>
           </div>
         </div>
 
@@ -1076,6 +1125,12 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
 
         {phase === "dealing" && elapsed < 1600 && (
           <div data-nomore style={S.noMoreBets}>NO MORE BETS</div>
+        )}
+        {showShuffle && phase === "betting" && (
+          <div data-shuffle style={S.shuffleBanner}>
+            <div style={{ fontSize: 22, letterSpacing: 4 }}>🔀 SHUFFLING</div>
+            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, marginTop: 4 }}>새 슈 #{shoeNo} · 8덱 · {shuffleLeft}초 뒤 베팅 시작</div>
+          </div>
         )}
 
         {fresh && phase === "betting" && (
@@ -1271,6 +1326,13 @@ const S = {
   extraChipCount: { color: "#fff", fontSize: 9, fontWeight: 800 },
   placedAmount: { fontSize: 11, color: "#F5E9D2", fontWeight: 800, marginTop: 4 },
   infoLine: { textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.6)", margin: "8px 0" },
+  shoeBar: { margin: "0 0 10px", padding: "8px 12px", borderRadius: 12, background: "rgba(0,0,0,0.35)", border: "1px solid rgba(212,165,116,0.22)" },
+  shoeBarTop: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.8)", marginBottom: 6, gap: 8 },
+  shoeBarBottom: { display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 5, gap: 8, flexWrap: "wrap" },
+  shoeTrack: { position: "relative", height: 8, borderRadius: 4, background: "rgba(255,255,255,0.1)", overflow: "visible" },
+  shoeFill: { height: "100%", borderRadius: 4, transition: "width 0.5s" },
+  shoeCutMark: { position: "absolute", top: -3, width: 3, height: 14, borderRadius: 2, background: "#EF4444", boxShadow: "0 0 6px rgba(239,68,68,0.8)", transform: "translateX(-1px)" },
+  shuffleBanner: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 30, textAlign: "center", color: "#fff", fontWeight: 900, padding: "14px 26px", borderRadius: 16, background: "linear-gradient(135deg, rgba(30,58,138,0.94), rgba(17,24,39,0.94))", border: "1.5px solid rgba(147,197,253,0.6)", boxShadow: "0 12px 40px rgba(59,130,246,0.45)", pointerEvents: "none", fontFamily: "'Playfair Display', serif", whiteSpace: "nowrap" },
   sessionChip: { fontSize: 10, fontWeight: 900, letterSpacing: 1.2, padding: "3px 10px", borderRadius: 12, border: "1px solid", background: "rgba(0,0,0,0.35)" },
   noMoreBets: { position: "absolute", top: "50%", left: "50%", zIndex: 30, fontSize: 24, fontWeight: 900, letterSpacing: 5, color: "#fff", padding: "10px 24px", borderRadius: 14, background: "linear-gradient(135deg, rgba(220,38,38,0.92), rgba(127,29,29,0.92))", border: "1.5px solid rgba(255,255,255,0.5)", boxShadow: "0 10px 36px rgba(220,38,38,0.5)", animation: "noMoreBets 1.6s ease-out forwards", pointerEvents: "none", whiteSpace: "nowrap", fontFamily: "'Playfair Display', serif" },
   seatRow: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 },
