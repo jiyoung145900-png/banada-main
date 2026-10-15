@@ -13,7 +13,7 @@ import { speak, setVoiceEnabled, setBgmEnabled, startBGM, stopBGM } from "./Bacc
 import {
   useBaccaratTable, useRoundBets, useBaccaratHistory, useMyBet,
   setBaccaratUser, joinBaccaratTable, heartbeatBaccarat, leaveBaccaratTable,
-  placeBaccaratBet, startBaccarat, sitBaccarat, draftBaccarat, readyBaccarat, nudgeBaccarat, sitOutBaccarat, openBaccarat, myCardsBaccarat, naturalBaccarat, revealMineBaccarat,
+  placeBaccaratBet, startBaccarat, sitBaccarat, draftBaccarat, readyBaccarat, nudgeBaccarat, sitOutBaccarat, openBaccarat, myCardsBaccarat, revealMineBaccarat,
   serverNowMs, MIN_BET, MAX_BET,
 } from "./BaccaratFirestore";
 
@@ -917,15 +917,9 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const bVals = phase === "dealing" ? revealV.b : fresh ? lastRes.bankerCards : [];
   const hasUnrevealed = [...pStates, ...bStates].some((s) => UNREVEALED_STATES.includes(s));
 
-  // 내추럴 자동 공개 (딜링이 끝나면 한 번 요청 → 서버가 내추럴일 때만 공개)
-  const naturalSent = useRef(0);
-  const naturalReady = phase === "dealing" && !!dealAt && elapsed >= NATURAL_WAIT + 150;
-  useEffect(() => {
-    if (!naturalReady || naturalSent.current === dealAt) return;
-    naturalSent.current = dealAt;
-    naturalBaccarat(tableId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [naturalReady, dealAt]);
+  // 내추럴(처음 두 장이 8·9)도 자동으로 열지 않음: 모든 판에서 담당 플레이어가 직접 카드를 까야 함.
+  //   (예전에는 딜링이 끝나는 순간 서버에 '내추럴이면 열어줘' 를 보내서 10판 중 3~4판은 스퀴즈를 못 했음)
+  //   내추럴은 양쪽 카드를 다 열면 3번째 카드 없이 바로 끝남.
 
   // 새 슈 알림: 입장한 뒤 슈 번호가 올라가면 안내
   const seenShoe = useRef(null);
