@@ -129,6 +129,15 @@ export const placeBaccaratBet = ({ tableId, bets }) => invoke({ tableId, action:
 // 시작 요청 (여러 번 호출해도 안전): 조건이 되면 시작, 아니면 { waiting: true }
 export const startBaccarat = (tableId) => invoke({ tableId, action: "start" });
 
+// 자리 앉기/옮기기 (빈 자리만, 확정 전에만)
+export const sitBaccarat = (tableId, seat) => invoke({ tableId, action: "sit", seat });
+// 실시간 칩: 확정 전에 올려둔 칩을 다른 플레이어 화면에 보여줌 (돈은 움직이지 않음)
+export const draftBaccarat = (tableId, bets) => invoke({ tableId, action: "draft", bets }).catch(() => null);
+// START(준비): 2명 이상이면 모두 눌러야 시작. on=false 면 취소
+export const readyBaccarat = (tableId, on = true) => invoke({ tableId, action: "ready", on });
+// 재촉: 시작을 막고 있는 플레이어에게 경고
+export const nudgeBaccarat = (tableId, target) => invoke({ tableId, action: "nudge", target });
+
 // 카드 한 장 열기 (손으로 충분히 깐 카드를 모두에게 공개). side: "player" | "banker"
 export const openBaccarat = (tableId, side, idx) => invoke({ tableId, action: "open", side, idx });
 // 내가 깔 수 있는 카드의 실제 앞면 (담당자에게만 내려옴)

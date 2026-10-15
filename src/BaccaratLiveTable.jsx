@@ -13,7 +13,7 @@ import { speak, setVoiceEnabled, setBgmEnabled, startBGM, stopBGM } from "./Bacc
 import {
   useBaccaratTable, useRoundBets, useBaccaratHistory, useMyBet,
   setBaccaratUser, joinBaccaratTable, heartbeatBaccarat, leaveBaccaratTable,
-  placeBaccaratBet, startBaccarat, openBaccarat, myCardsBaccarat, naturalBaccarat, revealMineBaccarat,
+  placeBaccaratBet, startBaccarat, sitBaccarat, draftBaccarat, readyBaccarat, nudgeBaccarat, openBaccarat, myCardsBaccarat, naturalBaccarat, revealMineBaccarat,
   serverNowMs, MIN_BET, MAX_BET,
 } from "./BaccaratFirestore";
 
@@ -62,6 +62,9 @@ const injectKeyframes = () => {
     @keyframes noMoreBets { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); } }
     @keyframes resultRise { 0% { opacity: 0; transform: translateY(16px) scale(0.94); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes winArea { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,215,106,0), inset 0 0 0 rgba(255,215,106,0); } 50% { box-shadow: 0 0 22px 2px rgba(255,215,106,0.75), inset 0 0 18px rgba(255,215,106,0.25); } }
+    @keyframes nudgeShake { 0%,100% { transform: translateX(0); } 15% { transform: translateX(-6px) rotate(-1deg); } 30% { transform: translateX(6px) rotate(1deg); } 45% { transform: translateX(-4px); } 60% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
+    @keyframes warnPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.0); } 50% { box-shadow: 0 0 0 4px rgba(239,68,68,0.55); } }
+    @keyframes seatPulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
     @keyframes toastIn { 0% { opacity: 0; transform: translate(-50%, 10px); } 100% { opacity: 1; transform: translate(-50%, 0); } }
   `;
   document.head.appendChild(style);
@@ -126,6 +129,67 @@ export function CasinoChip({ value, size = 40, drop = false }) {
         style={{ fontFamily: "Inter, Arial, sans-serif" }}>{label}</text>
     </svg>
   );
+}
+
+// ── 좌석 / 다른 사람 칩 / 시작 대기 계산 (순수 함수: 서버 규칙과 똑같이 계산해야 화면과 서버가 어긋나지 않음) ──
+export const MAX_SEATS = 7;
+const sumOf = (b) => (b ? Object.values(b).reduce((a, v) => a + (v > 0 ? v : 0), 0) : 0);
+
+// 자리별 정보: [{ seat, userId|null, name, total, status, mine }]  (빈 자리는 userId null)
+//   status: "empty" | "thinking"(칩 올리는 중) | "confirmed"(확정, START 전) | "ready"(START 누름) | "idle"(앉아만 있음)
+export function buildSeatList({ table, players, myId, now }) {
+  const seats = (table && table.seats) || {};
+  const roundBets = (table && table.roundBets) || {};
+  const drafts = (table && table.drafts) || {};
+  const ready = (table && table.ready) || {};
+  const names = (table && table.names) || {};
+  const byUser = {};
+  Object.keys(seats).forEach((u) => { byUser[seats[u]] = u; });
+  const list = [];
+  for (let n = 1; n <= MAX_SEATS; n++) {
+    const u = byUser[n] || null;
+    if (!u) { list.push({ seat: n, userId: null, name: "", total: 0, status: "empty", mine: false, here: false }); continue; }
+    const here = players.includes(u);                  // 접속 중인지 (자리만 보존되는 중이면 false)
+    const confirmed = roundBets[u] > 0;
+    const total = confirmed ? roundBets[u] : sumOf(drafts[u] && drafts[u].bets);
+    let status = "idle";
+    if (confirmed) status = ready[u] ? "ready" : "confirmed";
+    else if (total > 0) status = "thinking";
+    list.push({ seat: n, userId: u, name: names[u] || "GUEST", total, status, mine: u === myId, here });
+  }
+  return list;
+}
+
+// 확정된 베팅 문서(roundBets 구독) + 아직 확정 전인 실시간 칩(drafts)을 합쳐서 영역별 목록으로
+export function collectOthers({ betDocs = [], table, players, myId }) {
+  const out = { player: [], banker: [], tie: [], playerPair: [], bankerPair: [], perfectPair: [] };
+  const seats = (table && table.seats) || {};
+  const drafts = (table && table.drafts) || {};
+  const names = (table && table.names) || {};
+  const confirmedUsers = new Set();
+  for (const b of betDocs) {
+    if (!b || b.userId === myId || b.settled) continue;
+    confirmedUsers.add(b.userId);
+    for (const k of Object.keys(out)) if (b.bets && b.bets[k] > 0) out[k].push({ userId: b.userId, seat: seats[b.userId] || 0, name: b.nickname || names[b.userId] || "GUEST", amount: b.bets[k], confirmed: true });
+  }
+  for (const u of Object.keys(drafts)) {
+    if (u === myId || confirmedUsers.has(u) || !players.includes(u)) continue;      // 확정한 사람은 확정 금액만, 접속 안 한 사람의 칩은 숨김
+    const d = drafts[u];
+    for (const k of Object.keys(out)) if (d && d.bets && d.bets[k] > 0) out[k].push({ userId: u, seat: seats[u] || 0, name: names[u] || "GUEST", amount: d.bets[k], confirmed: false });
+  }
+  for (const k of Object.keys(out)) out[k].sort((a, b) => a.seat - b.seat);
+  return out;
+}
+
+// 시작을 막고 있는 사람 (서버 holdingPlayers 와 같은 규칙)
+export function holdingList({ table, players }) {
+  const bets = (table && table.roundBets) || {};
+  const drafts = (table && table.drafts) || {};
+  const ready = (table && table.ready) || {};
+  const engaged = (table && table.engagedSeen) || {};
+  const required = players.filter((p) => bets[p] > 0 || engaged[p] || sumOf(drafts[p] && drafts[p].bets) > 0);
+  if (required.length < 2) return { required, confirm: [], ready: [], multi: false };
+  return { required, confirm: required.filter((p) => !(bets[p] > 0)), ready: required.filter((p) => bets[p] > 0 && !ready[p]), multi: true };
 }
 
 // 숫자가 0 에서 목표값까지 올라가는 연출
@@ -686,23 +750,24 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   const shownPoints = gamePoints - Math.max(0, desiredTotal - committedTotal);
 
   // 다른 플레이어가 확정한 영역별 금액
-  const serverArea = useMemo(() => {
-    const out = {}; AREA_KEYS.forEach((k) => (out[k] = 0));
-    roundBets.forEach((b) => {
-      if (b.userId === userId) return;
-      AREA_KEYS.forEach((k) => (out[k] += (b.bets && b.bets[k]) || 0));
-    });
-    return out;
-  }, [roundBets, userId]);
 
-  // 확정 안 했지만 칩을 만지는 중인 사람 (시작을 기다리게 만드는 사람)
+  // 시작을 막고 있는 사람 (서버의 시작 조건과 같은 규칙으로 계산)
   const confirmedMap = table?.roundBets || {};
-  const thinking = Object.keys(table?.engagedSeen || {}).filter(
-    (u) => u !== userId && players.includes(u) && !(confirmedMap[u] > 0)
-  );
+  const hold = useMemo(() => holdingList({ table, players }), [table, players.join("|")]);
+  const thinking = hold.confirm.filter((u) => u !== userId);               // 확정을 아직 안 한 다른 사람
+  const waitingReady = hold.ready;                                         // 확정했지만 START 를 안 누른 사람 (나 포함)
+  const iAmReady = !!(table?.ready || {})[userId];
+  const needStart = hold.multi && committedTotal > 0;                      // 2명 이상 → 확정 뒤 START 를 눌러야 함
+  const seatList = useMemo(() => buildSeatList({ table, players, myId: userId, now }), [table, players.join("|"), userId, Math.floor(now / 1000)]);
+  const mySeat = (table?.seats || {})[userId] || 0;
+  const spectator = !!table && !mySeat;                                    // 자리가 없으면 관전
+  const others = useMemo(() => collectOthers({ betDocs: roundBets, table, players, myId: userId }), [roundBets, table, players.join("|"), userId]);
   const endsAt = table?.bettingEndsAt || 0;
   const secondsLeft = endsAt ? Math.max(0, Math.ceil((endsAt - now) / 1000)) : null;
   const bettingClosed = !!endsAt && now >= endsAt;
+  const iHoldUp = hold.multi && phase === "betting" && (hold.confirm.includes(userId) || hold.ready.includes(userId));   // 내가 시작을 막고 있음
+  const warnSeconds = endsAt && !bettingClosed ? Math.ceil((endsAt - now) / 1000) : null;
+  const showWarn = iHoldUp && warnSeconds !== null && warnSeconds <= 10;
 
   // ── 슈(8덱) 상태 ──
   const SHOE_TOTAL = 416;
@@ -727,6 +792,19 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     return () => { clearInterval(hb); leaveBaccaratTable(tableId); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId, userId]);
+
+  // 실시간 칩: 올려둔 칩이 바뀌면 0.35초 뒤 다른 플레이어 화면에 보이도록 전송 (돈은 확정해야 움직임)
+  const draftKey = JSON.stringify(stacksToBets(desired));
+  const lastDraftSent = useRef("{}");
+  useEffect(() => {
+    if (phase !== "betting" || committedTotal > 0 || spectator || shuffling) return;
+    if (draftKey === lastDraftSent.current) return;
+    const id = setTimeout(() => { lastDraftSent.current = draftKey; draftBaccarat(tableId, JSON.parse(draftKey)); }, 350);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, phase, committedTotal, spectator, shuffling, tableId]);
+  // 새 판이 시작되면 전송 기록 초기화
+  useEffect(() => { lastDraftSent.current = "{}"; }, [round]);
 
   // 라운드가 바뀌면 작성 중인(미확정) 칩 초기화
   useEffect(() => { setDesired(emptyStacks()); }, [round]);
@@ -794,6 +872,20 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table?.shoeNo]);
+
+  // 재촉 받기: 누군가 나를 재촉하면 흔들림 + 경고 + 진동 (같은 재촉은 한 번만)
+  const lastPokeSeen = useRef(0);
+  const [shake, setShake] = useState(false);
+  const myPoke = (table?.pokes || {})[userId];
+  useEffect(() => {
+    if (!myPoke || myPoke.at <= lastPokeSeen.current) return;
+    if (lastPokeSeen.current === 0 && now - myPoke.at > 15000) { lastPokeSeen.current = myPoke.at; return; }   // 입장 전에 있던 오래된 재촉은 무시
+    lastPokeSeen.current = myPoke.at;
+    showToast(`⏰ ${myPoke.name} 님이 재촉했어요! ${hold.confirm.includes(userId) ? "베팅을 확정" : "START"}해 주세요`);
+    buzz([60, 40, 60]); playSound("peek");
+    setShake(true); setTimeout(() => setShake(false), 700);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myPoke && myPoke.at]);
 
   // 새 판이 딜링을 시작하면 이전 판 결과 패널을 닫음
   useEffect(() => { if (phase === "dealing") setMyResult(null); }, [phase]);
@@ -961,6 +1053,26 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     setBusy(false);
   };
 
+  // START(준비): 2명 이상이면 모두 눌러야 시작. 다시 누르면 취소
+  const toggleReady = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const on = !iAmReady;
+      await readyBaccarat(tableId, on);
+      if (on) { const r = await startBaccarat(tableId).catch(() => null); if (r && r.waiting) showToast(r.waitingFor?.length ? `다른 플레이어를 기다리는 중 (${hold.required.length - r.waitingFor.length}/${hold.required.length} 준비)` : "기다리는 중"); }
+    } catch (e) { showToast(e.message || "실패"); }
+    setBusy(false);
+  };
+  const nudge = async (targetId) => {
+    try { await nudgeBaccarat(tableId, targetId); showToast(`⏰ ${(table?.names || {})[targetId] || "플레이어"} 님을 재촉했어요`); playSound("chip"); }
+    catch (e) { showToast(e.message || "재촉 실패"); }
+  };
+  const sitAt = async (n) => {
+    try { await sitBaccarat(tableId, n); showToast(`${n}번 자리에 앉았어요`); playSound("chip"); }
+    catch (e) { showToast(e.message || "자리 이동 실패"); }
+  };
+
   // 지금 시작 (자동 시작이 안 됐을 때를 위한 수동 버튼)
   const startNow = async () => {
     if (busy) return;
@@ -994,6 +1106,11 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
     if (phase === "dealing") return elapsed < NATURAL_WAIT ? "🎴 카드 딜링 중..." : "🎴 카드를 잡고 원하는 방향으로 끌어서 열어보세요";
     if (committedTotal > 0 && thinking.length) {
       return `⏳ ${thinking.map((u) => names[u] || "플레이어").join(", ")} 님의 베팅 확정을 기다리는 중${secondsLeft !== null ? ` · ${secondsLeft}초` : ""}`;
+    }
+    if (needStart) {
+      const others2 = waitingReady.filter((u) => u !== userId);
+      if (!iAmReady) return `▶ START 를 눌러주세요 · ${hold.required.length - waitingReady.length}/${hold.required.length} 준비${secondsLeft !== null ? ` · ${secondsLeft}초` : ""}`;
+      return `✅ 준비 완료 · ${others2.map((u) => names[u] || "플레이어").join(", ")} 님의 START 를 기다리는 중${secondsLeft !== null ? ` · ${secondsLeft}초` : ""}`;
     }
     if (committedTotal > 0) return "✅ 베팅 확정 · 곧 시작합니다";
     if (endsAt) return `⏰ 다른 플레이어가 베팅 확정함 · ${secondsLeft}초 안에 베팅하세요`;
@@ -1040,6 +1157,11 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
       <BaccaratDealer phase={phase} message={dealerMessage} roundNumber={roundLabel} playerCount={players.length}
         speaking={phase === "dealing"} noMoreBets={bettingClosed} />
 
+      {showWarn && (
+        <div data-warn style={S.warnBanner}>
+          ⏰ {warnSeconds}초 뒤 자동으로 시작돼요 · {hold.confirm.includes(userId) ? "베팅을 확정하지 않으면 이번 판에서 제외돼요" : "START 를 눌러주세요"}
+        </div>
+      )}
       <div style={S.timerBar}>
         <div style={{ ...S.timerFill, width: phase === "betting" && endsAt ? `${Math.max(0, Math.min(100, ((endsAt - now) / 20000) * 100))}%` : "100%" }} />
         <div style={S.timerText}>{statusLine}</div>
@@ -1142,21 +1264,33 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
         )}
       </div>
 
-      {roundBets.length > 0 && (
-        <div style={S.seatRow}>
-          {roundBets.map((b) => {
-            const mine = b.userId === userId;
-            const parts = [["P", b.bets?.player, "#3B82F6"], ["B", b.bets?.banker, "#E63975"], ["T", b.bets?.tie, "#10B981"]].filter((x) => x[1] > 0);
-            return (
-              <div key={b.id || b.userId} data-seat style={{ ...S.seatPill, borderColor: mine ? "rgba(255,215,106,0.7)" : "rgba(255,255,255,0.14)", background: mine ? "rgba(255,215,106,0.1)" : "rgba(255,255,255,0.04)" }}>
-                <span style={{ ...S.seatAvatar, background: mine ? "linear-gradient(135deg,#FFD76A,#B8860B)" : "linear-gradient(135deg,#6B7280,#374151)", color: mine ? "#1b1204" : "#fff" }}>{(b.nickname || "G").slice(0, 1).toUpperCase()}</span>
-                <span style={{ fontWeight: 800, fontSize: 11 }}>{b.nickname || "GUEST"}{mine ? " (나)" : ""}</span>
-                {parts.map(([k, v, c]) => <span key={k} style={{ fontSize: 10, fontWeight: 800, color: c }}>{k} {fmtChip(v)}</span>)}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* ── 좌석 (실제 바카라 테이블처럼 7자리) ── */}
+      <div style={S.seatBar} data-seatbar>
+        {seatList.map((st) => {
+          const color = st.status === "ready" ? "#34D399" : st.status === "confirmed" ? "#FFD76A" : st.status === "thinking" ? "#F59E0B" : "rgba(255,255,255,0.25)";
+          const label = st.status === "ready" ? "READY" : st.status === "confirmed" ? "확정" : st.status === "thinking" ? "베팅중…" : st.userId ? (st.here ? "대기" : "자리비움") : "빈 자리";
+          const canNudge = st.userId && !st.mine && st.here && phase === "betting" && committedTotal > 0 && (hold.confirm.includes(st.userId) || hold.ready.includes(st.userId));
+          const arc = [10, 4, 0, 0, 0, 4, 10][st.seat - 1];
+          return (
+            <div key={st.seat} data-seat-pod={st.seat} data-status={st.status} style={{ ...S.seatPod, marginTop: arc }}>
+              {st.userId ? (
+                <div style={{ ...S.seatAvatarBig, borderColor: st.mine ? "#FFD76A" : color, boxShadow: st.mine ? "0 0 10px rgba(255,215,106,0.6)" : "none", opacity: st.here ? 1 : 0.45,
+                  background: st.mine ? "linear-gradient(135deg,#FFD76A,#B8860B)" : "linear-gradient(135deg,#4B5563,#1F2937)", color: st.mine ? "#1b1204" : "#fff",
+                  animation: st.status === "thinking" ? "seatPulse 1s ease-in-out infinite" : "none" }}>
+                  {(st.name || "G").slice(0, 1).toUpperCase()}
+                  <span style={S.seatNo}>{st.seat}</span>
+                </div>
+              ) : (
+                <button onClick={() => sitAt(st.seat)} disabled={phase !== "betting" || committedTotal > 0} data-sit={st.seat} style={S.seatEmpty} title={`${st.seat}번 자리에 앉기`}>{st.seat}</button>
+              )}
+              <div style={{ ...S.seatName, color: st.mine ? "#FFD76A" : "rgba(255,255,255,0.8)" }}>{st.userId ? `${st.name}${st.mine ? " (나)" : ""}` : ""}</div>
+              <div style={{ ...S.seatStatus, color }} data-seat-status>{st.userId && st.total > 0 ? `${fmtChip(st.total)} · ${label}` : label}</div>
+              {canNudge && <button onClick={() => nudge(st.userId)} data-nudge={st.userId} style={S.nudgeBtn}>⏰ 재촉</button>}
+            </div>
+          );
+        })}
+      </div>
+      {spectator && <div data-spectator style={S.spectatorNote}>👀 자리가 가득 차서 관전 중이에요 · 빈 자리가 생기면 눌러서 앉으세요</div>}
 
       {/* ── 내 결과 (카운트업) ── */}
       {myResult && phase === "betting" && (
@@ -1204,14 +1338,14 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           </div>
 
           <div style={S.boardAreas}>
-            <AreaBox label="PLAYER" sub="1 : 1" color="#3B82F6" mine={desired.player} other={serverArea.player} onClick={() => placeChip("player")} disabled={!bettingOpen} win={winAreas.has("player")} />
-            <AreaBox label="TIE" sub="8 : 1" color="#10B981" mine={desired.tie} other={serverArea.tie} onClick={() => placeChip("tie")} disabled={!bettingOpen} win={winAreas.has("tie")} />
-            <AreaBox label="BANKER" sub="0.95 : 1" color="#E63975" mine={desired.banker} other={serverArea.banker} onClick={() => placeChip("banker")} disabled={!bettingOpen} win={winAreas.has("banker")} />
+            <AreaBox label="PLAYER" sub="1 : 1" color="#3B82F6" mine={desired.player} others={others.player} onClick={() => placeChip("player")} disabled={!bettingOpen} win={winAreas.has("player")} />
+            <AreaBox label="TIE" sub="8 : 1" color="#10B981" mine={desired.tie} others={others.tie} onClick={() => placeChip("tie")} disabled={!bettingOpen} win={winAreas.has("tie")} />
+            <AreaBox label="BANKER" sub="0.95 : 1" color="#E63975" mine={desired.banker} others={others.banker} onClick={() => placeChip("banker")} disabled={!bettingOpen} win={winAreas.has("banker")} />
           </div>
           <div style={S.boardAreas}>
-            <AreaBox compact label="P PAIR" sub="11 : 1" color="#60A5FA" mine={desired.playerPair} other={serverArea.playerPair} onClick={() => placeChip("playerPair")} disabled={!bettingOpen} win={winAreas.has("playerPair")} />
-            <AreaBox compact label="PERFECT" sub="25 : 1" color="#D4A574" mine={desired.perfectPair} other={serverArea.perfectPair} onClick={() => placeChip("perfectPair")} disabled={!bettingOpen} win={winAreas.has("perfectPair")} />
-            <AreaBox compact label="B PAIR" sub="11 : 1" color="#F472B6" mine={desired.bankerPair} other={serverArea.bankerPair} onClick={() => placeChip("bankerPair")} disabled={!bettingOpen} win={winAreas.has("bankerPair")} />
+            <AreaBox compact label="P PAIR" sub="11 : 1" color="#60A5FA" mine={desired.playerPair} others={others.playerPair} onClick={() => placeChip("playerPair")} disabled={!bettingOpen} win={winAreas.has("playerPair")} />
+            <AreaBox compact label="PERFECT" sub="25 : 1" color="#D4A574" mine={desired.perfectPair} others={others.perfectPair} onClick={() => placeChip("perfectPair")} disabled={!bettingOpen} win={winAreas.has("perfectPair")} />
+            <AreaBox compact label="B PAIR" sub="11 : 1" color="#F472B6" mine={desired.bankerPair} others={others.bankerPair} onClick={() => placeChip("bankerPair")} disabled={!bettingOpen} win={winAreas.has("bankerPair")} />
           </div>
 
           <div style={S.infoLine}>
@@ -1237,7 +1371,13 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
               : multi ? `✅ 베팅 확정 (${desiredTotal.toLocaleString()})` : `🎲 베팅 확정 · 바로 시작 (${desiredTotal.toLocaleString()})`}
           </button>
 
-          {committedTotal > 0 && !busy && (
+          {needStart && (
+            <button onClick={toggleReady} disabled={busy} data-act="ready"
+              style={{ ...S.readyBtn, background: iAmReady ? "linear-gradient(135deg, #065F46, #047857)" : "linear-gradient(135deg, #10B981, #059669)", animation: shake ? "nudgeShake 0.7s" : (!iAmReady ? "warnPulse 1.4s ease-in-out infinite" : "none") }}>
+              {iAmReady ? `✅ READY · ${hold.required.length - waitingReady.length}/${hold.required.length} 준비 (누르면 취소)` : `▶ START · ${hold.required.length - waitingReady.length}/${hold.required.length} 준비`}
+            </button>
+          )}
+          {committedTotal > 0 && !busy && !needStart && (
             <button onClick={startNow} style={{ ...S.revealAllBtn, marginTop: 8 }}>▶ 지금 시작</button>
           )}
         </div>
@@ -1247,9 +1387,14 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
 }
 
 // 베팅 영역 (내 작성분 + 다른 플레이어 확정분)
-function AreaBox({ label, sub, color, mine, other, onClick, disabled, compact, win }) {
+// 칩의 금액 → 가장 가까운 칩 종류 (작은 칩 표시용)
+const chipForAmount = (amt) => [...CHIPS].reverse().find((v) => amt >= v) || CHIPS[0];
+
+function AreaBox({ label, sub, color, mine, others = [], onClick, disabled, compact, win }) {
   const m = sum(mine);
-  const total = m + (other || 0);
+  const otherTotal = others.reduce((a, o) => a + o.amount, 0);
+  const total = m + otherTotal;
+  const shown = others.slice(0, 4);
   return (
     <button onClick={onClick} disabled={disabled} data-area-win={win ? "1" : "0"} style={{ ...S.betArea, minHeight: compact ? 84 : 124, opacity: disabled ? 0.6 : 1,
       borderColor: win ? "#FFD76A" : total > 0 ? color : "rgba(255,255,255,0.1)", background: total > 0 ? `${color}1f` : "rgba(255,255,255,0.03)",
@@ -1257,9 +1402,23 @@ function AreaBox({ label, sub, color, mine, other, onClick, disabled, compact, w
       <span style={{ color, fontWeight: 900, fontSize: compact ? 11 : 14, letterSpacing: 1 }}>{label}</span>
       <span style={S.betAreaSub}>{sub}</span>
       <PlacedChips stack={mine} />
+      {shown.length > 0 && (
+        <div style={S.otherChips} data-others>
+          {shown.map((o) => (
+            <span key={o.userId} data-other-chip={o.confirmed ? "confirmed" : "draft"} title={`${o.seat}번 ${o.name}`} style={{ ...S.otherChip, opacity: o.confirmed ? 1 : 0.5 }}>
+              <CasinoChip value={chipForAmount(o.amount)} size={compact ? 20 : 24} />
+              <span style={S.seatBadge}>{o.seat || "?"}</span>
+            </span>
+          ))}
+          {others.length > shown.length && <span style={S.otherMore}>+{others.length - shown.length}</span>}
+        </div>
+      )}
       {total > 0 && <span style={S.placedAmount}>{total.toLocaleString()}</span>}
-      {other > 0 && m > 0 && <span style={{ fontSize: 9, color: "rgba(255,255,255,0.5)" }}>다른 플레이어 {other.toLocaleString()}</span>}
-      {other > 0 && m === 0 && <span style={{ fontSize: 9, color: "rgba(255,255,255,0.5)" }}>다른 플레이어</span>}
+      {others.length > 0 && (
+        <span style={{ fontSize: 9, color: "rgba(255,255,255,0.55)", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {others.map((o) => `${o.seat}번 ${fmtChip(o.amount)}${o.confirmed ? "" : "…"}`).join(" · ")}
+        </span>
+      )}
     </button>
   );
 }
@@ -1335,6 +1494,21 @@ const S = {
   shuffleBanner: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 30, textAlign: "center", color: "#fff", fontWeight: 900, padding: "14px 26px", borderRadius: 16, background: "linear-gradient(135deg, rgba(30,58,138,0.94), rgba(17,24,39,0.94))", border: "1.5px solid rgba(147,197,253,0.6)", boxShadow: "0 12px 40px rgba(59,130,246,0.45)", pointerEvents: "none", fontFamily: "'Playfair Display', serif", whiteSpace: "nowrap" },
   sessionChip: { fontSize: 10, fontWeight: 900, letterSpacing: 1.2, padding: "3px 10px", borderRadius: 12, border: "1px solid", background: "rgba(0,0,0,0.35)" },
   noMoreBets: { position: "absolute", top: "50%", left: "50%", zIndex: 30, fontSize: 24, fontWeight: 900, letterSpacing: 5, color: "#fff", padding: "10px 24px", borderRadius: 14, background: "linear-gradient(135deg, rgba(220,38,38,0.92), rgba(127,29,29,0.92))", border: "1.5px solid rgba(255,255,255,0.5)", boxShadow: "0 10px 36px rgba(220,38,38,0.5)", animation: "noMoreBets 1.6s ease-out forwards", pointerEvents: "none", whiteSpace: "nowrap", fontFamily: "'Playfair Display', serif" },
+  seatBar: { display: "flex", justifyContent: "space-between", gap: 2, margin: "4px 0 12px", padding: "8px 4px 6px", borderRadius: 14, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(212,165,116,0.18)" },
+  seatPod: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
+  seatAvatarBig: { position: "relative", width: 36, height: 36, borderRadius: "50%", border: "2.5px solid", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900 },
+  seatNo: { position: "absolute", bottom: -4, right: -4, minWidth: 14, height: 14, borderRadius: 7, background: "#111827", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", fontSize: 8, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 2px" },
+  seatEmpty: { width: 36, height: 36, borderRadius: "50%", border: "2px dashed rgba(255,255,255,0.25)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 800, cursor: "pointer" },
+  seatName: { fontSize: 9, fontWeight: 800, width: "100%", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minHeight: 11 },
+  seatStatus: { fontSize: 8, fontWeight: 800, letterSpacing: 0.3, textAlign: "center", lineHeight: 1.2, minHeight: 10, width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  nudgeBtn: { marginTop: 2, padding: "2px 6px", borderRadius: 8, border: "1px solid rgba(251,191,36,0.6)", background: "rgba(251,191,36,0.15)", color: "#FBBF24", fontSize: 9, fontWeight: 800, cursor: "pointer" },
+  spectatorNote: { margin: "-6px 0 10px", padding: "6px 10px", borderRadius: 10, background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.35)", color: "#93C5FD", fontSize: 11, fontWeight: 700, textAlign: "center" },
+  warnBanner: { margin: "0 0 8px", padding: "8px 12px", borderRadius: 12, background: "linear-gradient(135deg, rgba(220,38,38,0.35), rgba(127,29,29,0.35))", border: "1.5px solid rgba(239,68,68,0.7)", color: "#FECACA", fontSize: 12, fontWeight: 800, textAlign: "center", animation: "warnPulse 1s ease-in-out infinite" },
+  readyBtn: { width: "100%", marginTop: 8, padding: 14, borderRadius: 14, border: "none", color: "#fff", fontSize: 14, fontWeight: 900, letterSpacing: 1, cursor: "pointer" },
+  otherChips: { display: "flex", alignItems: "center", justifyContent: "center", flexWrap: "wrap", gap: 2, margin: "2px 0", pointerEvents: "none" },
+  otherChip: { position: "relative", display: "inline-block" },
+  seatBadge: { position: "absolute", top: -3, right: -3, minWidth: 11, height: 11, borderRadius: 6, background: "#111827", border: "1px solid rgba(255,255,255,0.5)", color: "#fff", fontSize: 7, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" },
+  otherMore: { fontSize: 9, color: "rgba(255,255,255,0.6)", fontWeight: 800 },
   seatRow: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 },
   seatPill: { display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px 4px 4px", borderRadius: 20, border: "1px solid" },
   seatAvatar: { width: 22, height: 22, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 },
