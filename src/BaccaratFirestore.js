@@ -137,6 +137,8 @@ export const draftBaccarat = (tableId, bets) => invoke({ tableId, action: "draft
 export const readyBaccarat = (tableId, on = true) => invoke({ tableId, action: "ready", on });
 // 재촉: 시작을 막고 있는 플레이어에게 경고
 export const nudgeBaccarat = (tableId, target) => invoke({ tableId, action: "nudge", target });
+// 쉬기 / 복귀: 쉬는 동안은 다른 사람의 시작을 기다리게 하지 않음 (칩을 올리면 자동 복귀)
+export const sitOutBaccarat = (tableId, on = true) => invoke({ tableId, action: "sitout", on });
 
 // 카드 한 장 열기 (손으로 충분히 깐 카드를 모두에게 공개). side: "player" | "banker"
 export const openBaccarat = (tableId, side, idx) => invoke({ tableId, action: "open", side, idx });
