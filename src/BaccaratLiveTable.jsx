@@ -62,6 +62,9 @@ const injectKeyframes = () => {
     @keyframes noMoreBets { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); } }
     @keyframes resultRise { 0% { opacity: 0; transform: translateY(16px) scale(0.94); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes winArea { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,215,106,0), inset 0 0 0 rgba(255,215,106,0); } 50% { box-shadow: 0 0 22px 2px rgba(255,215,106,0.75), inset 0 0 18px rgba(255,215,106,0.25); } }
+    [data-3d] { transition: transform .12s ease, box-shadow .12s ease, filter .12s ease; }
+    [data-3d]:not(:disabled):hover { filter: brightness(1.08); }
+    [data-3d]:not(:disabled):active { transform: translateY(3px) !important; box-shadow: 0 1px 0 rgba(0,0,0,0.55), 0 2px 5px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12) !important; filter: brightness(0.96); }
     @keyframes nudgeShake { 0%,100% { transform: translateX(0); } 15% { transform: translateX(-6px) rotate(-1deg); } 30% { transform: translateX(6px) rotate(1deg); } 45% { transform: translateX(-4px); } 60% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
     @keyframes warnPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.0); } 50% { box-shadow: 0 0 0 4px rgba(239,68,68,0.55); } }
     @keyframes seatPulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
@@ -229,7 +232,7 @@ export function CardBack3D() {
 // 테이블 바탕: 원근감 있는 펠트 + 나무 테두리 + 조명. 박스 크기에 맞춰 늘어나는 배경 (카드 등은 그 위에 HTML 로 올림)
 export function TableBackdrop3D() {
   return (
-    <svg viewBox="0 0 400 220" width="100%" height="100%" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, display: "block", borderRadius: 26 }} data-table3d>
+    <svg viewBox="0 0 400 220" width="100%" height="100%" preserveAspectRatio="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "block", borderRadius: 26 }} data-table3d>
       <defs>
         <linearGradient id="tbRail" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f0cf85" /><stop offset="12%" stopColor="#c9993f" /><stop offset="55%" stopColor="#7a4f16" /><stop offset="100%" stopColor="#3b2308" /></linearGradient>
         <radialGradient id="tbFeltG" cx="50%" cy="38%" r="75%"><stop offset="0%" stopColor="#1f8a56" /><stop offset="55%" stopColor="#0d5a37" /><stop offset="100%" stopColor="#05301d" /></radialGradient>
@@ -367,6 +370,9 @@ export function shortMoney(n) {
   return String(v);
 }
 
+// 눌러 낸 입체: 아래쪽 단단한 가장자리(두께) + 부드러운 그림자 + 위쪽 하이라이트
+const EDGE = (h = 4, c = "rgba(0,0,0,0.55)") => `0 ${h}px 0 ${c}, 0 ${h * 2 + 2}px ${h * 3}px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -3px 0 rgba(0,0,0,0.22)`;
+
 // 컨테이너 폭을 재서 넓으면 3열(에볼루션식), 좁으면 세로 배치. layout 으로 강제 가능 (테스트용)
 function useWide(forced, threshold = 720) {
   const ref = useRef(null);
@@ -419,7 +425,7 @@ function Confetti() {
     []
   );
   return (
-    <div data-confetti style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 10050, overflow: "hidden" }}>
+    <div data-confetti style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none", zIndex: 10050, overflow: "hidden" }}>
       {pieces.map((p) => (
         <div
           key={p.id}
@@ -775,15 +781,15 @@ export function Card3D({ card, state, interactive = false, onCommit, highlight, 
         }}
       >
         {/* 앞면 (벡터 트럼프) */}
-        <div style={{ position: "absolute", inset: 0, borderRadius: 6, background: "#FFFFFF", border: "1px solid #1D1D22", boxSizing: "border-box", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 6, background: "#FFFFFF", border: "1px solid #1D1D22", boxSizing: "border-box", overflow: "hidden" }}>
           {card ? <PlayingCardFace rank={card.rank} suit={card.suit} /> : null}
         </div>
         {/* 뒷면: 접힌 만큼 잘려 나감 (자른 모서리에 그림자) */}
-        <div style={{ position: "absolute", inset: 0, filter: folding ? "drop-shadow(0 3px 5px rgba(0,0,0,0.55))" : "none" }}>
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, filter: folding ? "drop-shadow(0 3px 5px rgba(0,0,0,0.55))" : "none" }}>
           <div
             data-cover={clip}
             style={{
-              position: "absolute", inset: 0, borderRadius: 6, overflow: "hidden",
+              position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 6, overflow: "hidden",
               boxSizing: "border-box",
               clipPath: clip, WebkitClipPath: clip,
               transition: folding ? "none" : "clip-path 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -815,27 +821,6 @@ function PlacedChips({ stack }) {
   );
 }
 
-function BetBox({ label, sub, color, stack, onClick, disabled, compact }) {
-  const total = sum(stack);
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        ...S.betArea,
-        minHeight: compact ? 84 : 124,
-        borderColor: total > 0 ? color : "rgba(255,255,255,0.1)",
-        background: total > 0 ? `${color}1f` : "rgba(255,255,255,0.03)",
-        opacity: disabled ? 0.6 : 1,
-      }}
-    >
-      <span style={{ color, fontWeight: 900, fontSize: compact ? 11 : 14, letterSpacing: 1 }}>{label}</span>
-      <span style={S.betAreaSub}>{sub}</span>
-      <PlacedChips stack={stack} />
-      {total > 0 && <span style={S.placedAmount}>{total.toLocaleString()}</span>}
-    </button>
-  );
-}
 
 
 
@@ -1323,7 +1308,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
   // ── 영역별 조각 (넓은 화면 / 좁은 화면에서 같은 조각을 다른 위치에 놓음) ──
   const topBar = (
     <div style={S.topBar} data-topbar>
-      <button onClick={() => onLeave()} style={S.topBack} aria-label="lobby">←</button>
+      <button data-3d onClick={() => onLeave()} style={S.topBack} aria-label="lobby">←</button>
       <div style={S.topTitleBox}>
         <div style={S.topTitle}>스퀴즈 바카라</div>
         <div style={S.topSub}>
@@ -1338,10 +1323,10 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           </span>
         )}
         {onSwitchTable && (
-          <button onClick={() => onSwitchTable(tableId === "table1" ? "table2" : "table1")} data-switch style={S.toggleBtn} title="다른 테이블로">⇄</button>
+          <button data-3d onClick={() => onSwitchTable(tableId === "table1" ? "table2" : "table1")} data-switch style={S.toggleBtn} title="다른 테이블로">⇄</button>
         )}
-        <button onClick={() => { setVoiceOn((v) => !v); setVoiceEnabled(!voiceOn); }} style={S.toggleBtn}>{voiceOn ? "🔊" : "🔇"}</button>
-        <button onClick={() => { setBgmOn((v) => !v); setBgmEnabled(!bgmOn); }} style={S.toggleBtn}>{bgmOn ? "🎵" : "🎶"}</button>
+        <button data-3d onClick={() => { setVoiceOn((v) => !v); setVoiceEnabled(!voiceOn); }} style={S.toggleBtn}>{voiceOn ? "🔊" : "🔇"}</button>
+        <button data-3d onClick={() => { setBgmOn((v) => !v); setBgmEnabled(!bgmOn); }} style={S.toggleBtn}>{bgmOn ? "🎵" : "🎶"}</button>
         <div style={S.points}>💎 {shownPoints.toLocaleString()}</div>
       </div>
     </div>
@@ -1440,18 +1425,18 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           return (
             <div key={st.seat} data-seat-pod={st.seat} data-status={st.status} style={{ ...S.seatPod, marginTop: arc }}>
               {st.userId ? (
-                <div style={{ ...S.seatAvatarBig, borderColor: st.mine ? "#FFD76A" : color, boxShadow: st.mine ? "0 0 10px rgba(255,215,106,0.6)" : "none", opacity: st.here && st.status !== "away" ? 1 : 0.45,
+                <div style={{ ...S.seatAvatarBig, borderColor: st.mine ? "#FFD76A" : color, boxShadow: st.mine ? "0 3px 0 rgba(0,0,0,0.55), 0 0 12px rgba(255,215,106,0.7), inset 0 1px 0 rgba(255,255,255,0.3)" : "0 3px 0 rgba(0,0,0,0.55), 0 6px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.22)", opacity: st.here && st.status !== "away" ? 1 : 0.45,
                   background: st.mine ? "linear-gradient(135deg,#FFD76A,#B8860B)" : "linear-gradient(135deg,#4B5563,#1F2937)", color: st.mine ? "#1b1204" : "#fff",
                   animation: st.status === "thinking" ? "seatPulse 1s ease-in-out infinite" : "none" }}>
                   {(st.name || "G").slice(0, 1).toUpperCase()}
                   <span style={S.seatNo}>{st.seat}</span>
                 </div>
               ) : (
-                <button onClick={() => sitAt(st.seat)} disabled={phase !== "betting" || committedTotal > 0} data-sit={st.seat} style={S.seatEmpty} title={`${st.seat}번 자리에 앉기`}>{st.seat}</button>
+                <button data-3d onClick={() => sitAt(st.seat)} disabled={phase !== "betting" || committedTotal > 0} data-sit={st.seat} style={S.seatEmpty} title={`${st.seat}번 자리에 앉기`}>{st.seat}</button>
               )}
               <div style={{ ...S.seatName, color: st.mine ? "#FFD76A" : "rgba(255,255,255,0.8)" }}>{st.userId ? `${st.name}${st.mine ? " (나)" : ""}` : ""}</div>
               <div style={{ ...S.seatStatus, color }} data-seat-status>{st.userId && st.total > 0 ? `${fmtChip(st.total)} · ${label}` : label}</div>
-              {canNudge && <button onClick={() => nudge(st.userId)} data-nudge={st.userId} style={S.nudgeBtn}>⏰ 재촉</button>}
+              {canNudge && <button data-3d onClick={() => nudge(st.userId)} data-nudge={st.userId} style={S.nudgeBtn}>⏰ 재촉</button>}
             </div>
           );
         })}
@@ -1484,7 +1469,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
       {/* ── 딜링 중: 모두 열기 ── */}
       {phase === "dealing" && (
         <div>
-          {canRevealMine && <button onClick={revealMine} style={S.revealAllBtn}>👁 내 카드 모두 열기 (SKIP)</button>}
+          {canRevealMine && <button data-3d onClick={revealMine} style={S.revealAllBtn}>👁 내 카드 모두 열기 (SKIP)</button>}
           {!canRevealMine && hasUnrevealed && squeezeOpen && (
             <div style={S.squeezeGuide}>다른 플레이어가 카드를 열고 있어요 · 모든 화면에 똑같이 보입니다</div>
           )}
@@ -1505,7 +1490,7 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
             <AreaBox variant="row" wide area="banker" label="BANKER" sub="0.95:1" color="#E63975" mine={desired.banker} others={others.banker} stat={stat.banker} onClick={() => placeChip("banker")} disabled={!bettingOpen} win={winAreas.has("banker")} />
             <AreaBox variant="row" area="bankerPair" label="B PAIR" sub="11:1" color="#F472B6" mine={desired.bankerPair} others={others.bankerPair} stat={stat.bankerPair} onClick={() => placeChip("bankerPair")} disabled={!bettingOpen} win={winAreas.has("bankerPair")} />
           </div>
-          <button onClick={() => placeChip("perfectPair")} disabled={!bettingOpen} data-area="perfectPair" data-area-win={winAreas.has("perfectPair") ? "1" : "0"}
+          <button data-3d onClick={() => placeChip("perfectPair")} disabled={!bettingOpen} data-area="perfectPair" data-area-win={winAreas.has("perfectPair") ? "1" : "0"}
             style={{ ...S.perfectBar, opacity: !bettingOpen ? 0.6 : 1, borderColor: winAreas.has("perfectPair") ? "#FFD76A" : "rgba(212,165,116,0.4)", animation: winAreas.has("perfectPair") ? "winArea 1.1s ease-in-out infinite" : "none" }}>
             <span style={{ color: "#D4A574", fontWeight: 900, fontSize: 11, letterSpacing: 1 }}>PERFECT PAIR</span>
             <span style={{ opacity: 0.7, fontSize: 9 }}>25:1</span>
@@ -1536,13 +1521,13 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
 
           {/* 버튼 한 줄: 취소 | 리셋 | 리벳 | ×2 */}
           <div style={S.ctrlRow}>
-            <button onClick={removeLastChip} disabled={desiredTotal === 0} data-act="undo" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #6B7280, #4B5563)", opacity: desiredTotal === 0 ? 0.4 : 1 }}>↩ 취소</button>
-            <button onClick={clearDesired} disabled={desiredTotal === 0} data-act="clear" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #DC2626, #991B1B)", opacity: desiredTotal === 0 ? 0.4 : 1 }}>🗑 리셋</button>
-            <button onClick={rebet} disabled={!lastBets || busy || bettingClosed} data-act="rebet" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #0EA5E9, #0369A1)", opacity: !lastBets || busy || bettingClosed ? 0.4 : 1 }}>⟲ REBET{lastBets ? ` ${fmtChip(sumBetValues(lastBets))}` : ""}</button>
-            <button onClick={doubleDesired} disabled={desiredTotal === 0 || busy || bettingClosed} data-act="double" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #D4A574, #B07D46)", color: "#1b1204", opacity: desiredTotal === 0 || busy || bettingClosed ? 0.4 : 1 }}>×2</button>
+            <button data-3d onClick={removeLastChip} disabled={desiredTotal === 0} data-act="undo" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #6B7280, #4B5563)", boxShadow: EDGE(4, "#1F2937"), opacity: desiredTotal === 0 ? 0.4 : 1 }}>↩ 취소</button>
+            <button data-3d onClick={clearDesired} disabled={desiredTotal === 0} data-act="clear" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #DC2626, #991B1B)", boxShadow: EDGE(4, "#450A0A"), opacity: desiredTotal === 0 ? 0.4 : 1 }}>🗑 리셋</button>
+            <button data-3d onClick={rebet} disabled={!lastBets || busy || bettingClosed} data-act="rebet" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #0EA5E9, #0369A1)", boxShadow: EDGE(4, "#0C2D48"), opacity: !lastBets || busy || bettingClosed ? 0.4 : 1 }}>⟲ REBET{lastBets ? ` ${fmtChip(sumBetValues(lastBets))}` : ""}</button>
+            <button data-3d onClick={doubleDesired} disabled={desiredTotal === 0 || busy || bettingClosed} data-act="double" style={{ ...S.ctrlBtn, background: "linear-gradient(135deg, #D4A574, #B07D46)", boxShadow: EDGE(4, "#5C3D17"), color: "#1b1204", opacity: desiredTotal === 0 || busy || bettingClosed ? 0.4 : 1 }}>×2</button>
           </div>
 
-          <button onClick={confirmBet} disabled={busy || !bettingOpen || mainDesired === 0 || desiredTotal === committedTotal}
+          <button data-3d onClick={confirmBet} disabled={busy || !bettingOpen || mainDesired === 0 || desiredTotal === committedTotal}
             style={{ ...S.actionBtn, marginTop: 8, opacity: busy || !bettingOpen || mainDesired === 0 || desiredTotal === committedTotal ? 0.5 : 1 }}>
             {busy ? "⏳ 처리 중..."
               : committedTotal > 0 && desiredTotal === committedTotal ? "✅ 베팅 확정됨"
@@ -1551,18 +1536,18 @@ export default function BaccaratLiveTable({ tableId, userId, userName, gamePoint
           </button>
 
           {needStart && (
-            <button onClick={toggleReady} disabled={busy} data-act="ready"
-              style={{ ...S.readyBtn, background: iAmReady ? "linear-gradient(135deg, #065F46, #047857)" : "linear-gradient(135deg, #10B981, #059669)", animation: shake ? "nudgeShake 0.7s" : (!iAmReady ? "warnPulse 1.4s ease-in-out infinite" : "none") }}>
+            <button data-3d onClick={toggleReady} disabled={busy} data-act="ready"
+              style={{ ...S.readyBtn, background: iAmReady ? "linear-gradient(135deg, #065F46, #047857)" : "linear-gradient(135deg, #10B981, #059669)", boxShadow: EDGE(5, iAmReady ? "#022C22" : "#064E3B"), animation: shake ? "nudgeShake 0.7s" : (!iAmReady ? "warnPulse 1.4s ease-in-out infinite" : "none") }}>
               {iAmReady ? `✅ READY · ${hold.required.length - waitingReady.length}/${hold.required.length} 준비 (누르면 취소)` : `▶ START · ${hold.required.length - waitingReady.length}/${hold.required.length} 준비`}
             </button>
           )}
           {committedTotal > 0 && !busy && !needStart && (
-            <button onClick={startNow} style={{ ...S.revealAllBtn, marginTop: 8 }}>▶ 지금 시작</button>
+            <button data-3d onClick={startNow} style={{ ...S.revealAllBtn, marginTop: 8 }}>▶ 지금 시작</button>
           )}
 
           {/* 쉬기: 이번 판에 베팅하지 않을 때 다른 플레이어를 기다리게 하지 않음 */}
           {committedTotal === 0 && !spectator && (
-            <button onClick={toggleSitOut} data-act="sitout" style={{ ...S.sitOutBtn, ...(iAmAway ? S.sitOutBtnOn : null) }}>
+            <button data-3d onClick={toggleSitOut} data-act="sitout" style={{ ...S.sitOutBtn, ...(iAmAway ? S.sitOutBtnOn : null) }}>
               {iAmAway ? "☕ 쉬는 중 · 눌러서 복귀 (칩을 올려도 복귀)" : "☕ 이번엔 쉬기 · 다른 플레이어를 기다리게 하지 않아요"}
             </button>
           )}
@@ -1639,7 +1624,7 @@ function AreaBox({ label, sub, color, mine, others = [], onClick, disabled, comp
   const big = isRow && variant === "row" && wide;                       // 플레이어/뱅커 같은 큰 영역
   const base = isRow ? { ...S.rowArea, flex: wide ? 2.1 : area === "tie" ? 1.3 : 1.05, minHeight: wide ? 132 : area === "tie" ? 132 : 108 } : { ...S.betArea, minHeight: compact ? 84 : 124 };
   return (
-    <button onClick={onClick} disabled={disabled} data-area-win={win ? "1" : "0"} data-area={area} style={{ ...base, opacity: disabled ? 0.6 : 1,
+    <button data-3d onClick={onClick} disabled={disabled} data-area-win={win ? "1" : "0"} data-area={area} style={{ ...base, boxShadow: isRow ? EDGE(5, `${color}59`) : base.boxShadow, opacity: disabled ? 0.6 : 1,
       borderColor: win ? "#FFD76A" : total > 0 ? color : isRow ? `${color}88` : "rgba(255,255,255,0.1)",
       background: isRow ? `linear-gradient(180deg, ${color}${total > 0 ? "55" : "33"}, ${color}${total > 0 ? "26" : "14"})` : total > 0 ? `${color}1f` : "rgba(255,255,255,0.03)",
       animation: win ? "winArea 1.1s ease-in-out infinite" : "none" }}>
@@ -1680,11 +1665,11 @@ const S = {
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, paddingRight: 44 },
   backBtn: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "#fff", padding: "8px 14px", borderRadius: 20, cursor: "pointer", fontSize: 11, fontWeight: 700 },
   title: { margin: 0, fontSize: 17, fontWeight: 900, background: "linear-gradient(135deg, #D4A574, #FFF)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", letterSpacing: 2, fontFamily: "'Playfair Display', serif" },
-  points: { background: "linear-gradient(135deg, #FFD700, #D4A574)", color: "#000", padding: "6px 14px", borderRadius: 20, fontWeight: 900, fontSize: 13, whiteSpace: "nowrap" },
+  points: { background: "linear-gradient(135deg, #FFD700, #D4A574)", color: "#000", padding: "6px 14px", borderRadius: 20, fontWeight: 900, fontSize: 13, whiteSpace: "nowrap" , boxShadow: "0 3px 0 #8A5A14, 0 7px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.6)"},
   subHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   tableTag: { fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "rgba(212,165,116,0.85)" },
   liveDot: { color: "#EF4444", fontSize: 9 },
-  toggleBtn: { width: 32, height: 28, borderRadius: 8, border: "1px solid rgba(212,165,116,0.3)", background: "rgba(255,255,255,0.05)", color: "#fff", cursor: "pointer", fontSize: 13 },
+  toggleBtn: { width: 32, height: 28, borderRadius: 8, border: "1px solid rgba(212,165,116,0.3)", background: "rgba(255,255,255,0.05)", color: "#fff", cursor: "pointer", fontSize: 13 , boxShadow: EDGE(3, "rgba(0,0,0,0.45)")},
 
   statsBar: { display: "flex", gap: 6, marginBottom: 10 },
   statChip: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: 800, color: "#fff", padding: "6px 4px", background: "rgba(255,255,255,0.04)", borderRadius: 6 },
@@ -1701,7 +1686,7 @@ const S = {
   roadmapToggleBtn: { background: "transparent", border: "none", color: "rgba(212,165,116,0.7)", fontSize: 10, cursor: "pointer" },
   roadmapEmpty: { padding: 18, textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: 11, fontStyle: "italic", background: "rgba(0,0,0,0.3)", borderRadius: 10, border: "1px dashed rgba(212,165,116,0.2)" },
 
-  tableArea: { position: "relative", marginBottom: 16, paddingTop: 44 },
+  tableArea: { position: "relative", marginBottom: 26, paddingTop: 44 },
   shoe: { position: "absolute", top: 0, left: 14, zIndex: 20, display: "flex", alignItems: "center", gap: 6 },
   shoeLabel: { fontSize: 8, letterSpacing: 2, color: "#D4A574", fontWeight: 900 },
   shoeBox: { position: "relative", width: 50, height: 58, background: "linear-gradient(135deg, #4a2818, #2a1810)", border: "2px solid #D4A574", borderRadius: "6px 6px 10px 10px", boxShadow: "0 6px 15px rgba(0,0,0,0.5)", animation: "shoeGlow 3s ease-in-out infinite", padding: "6px 5px 3px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", overflow: "hidden" },
@@ -1709,14 +1694,14 @@ const S = {
   shoeCard: { width: 32, height: 42, background: "linear-gradient(135deg, #8B0000, #5a0000)", border: "1.5px solid #D4A574", borderRadius: 3 },
   shoeDeckCount: { fontSize: 6, color: "rgba(212,165,116,0.9)", fontWeight: 900, letterSpacing: 1, fontFamily: "'Courier New', monospace" },
 
-  tableFelt3d: { position: "relative", borderRadius: 26, padding: "46px 14px 34px", display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 230, boxShadow: "0 22px 40px rgba(0,0,0,0.65)" },
+  tableFelt3d: { position: "relative", borderRadius: 26, padding: "46px 14px 34px", display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 230 , boxShadow: "0 7px 0 #63451F, 0 12px 0 #2A2114, 0 30px 55px rgba(0,0,0,0.78)"},
   shoe3d: { position: "absolute", top: -16, left: 8, zIndex: 20 },
   tableFelt: { background: "radial-gradient(ellipse at top, #1a4f36 0%, #061c12 100%)", borderRadius: 24, border: "4px solid #D4A574", padding: "26px 6px 30px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 20px 50px rgba(0,0,0,0.8), inset 0 0 60px rgba(0,0,0,0.5)", minHeight: 220 },
   playerSide: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center" },
   bankerSide: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center" },
   sideTitle: { fontSize: 13, fontWeight: 900, letterSpacing: 4, color: "#3B82F6", marginBottom: 14, textShadow: "0 2px 4px rgba(0,0,0,0.5)" },
   cardsContainer: { display: "flex", justifyContent: "center", alignItems: "center", minHeight: 90, marginBottom: 14, flexWrap: "nowrap" },
-  scoreBox: { background: "rgba(0,0,0,0.4)", border: "2px solid rgba(59,130,246,0.3)", color: "#3B82F6", fontSize: 24, fontWeight: 900, width: 50, height: 50, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center" },
+  scoreBox: { background: "rgba(0,0,0,0.4)", border: "2px solid rgba(59,130,246,0.3)", color: "#3B82F6", fontSize: 24, fontWeight: 900, width: 50, height: 50, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center" , boxShadow: "0 5px 0 rgba(0,0,0,0.38), 0 9px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.12)"},
   vsText: { color: "rgba(255,255,255,0.2)", fontSize: 18, fontWeight: 900, fontStyle: "italic", padding: "0 2px" },
   peekHint: { position: "absolute", top: -22, left: "50%", transform: "translateX(-50%)", fontSize: 14, zIndex: 5, animation: "peekPulse 1.5s ease-in-out infinite" },
 
@@ -1749,7 +1734,7 @@ const S = {
   sessionChip: { fontSize: 10, fontWeight: 900, letterSpacing: 1.2, padding: "3px 10px", borderRadius: 12, border: "1px solid", background: "rgba(0,0,0,0.35)" },
   noMoreBets: { position: "absolute", top: "50%", left: "50%", zIndex: 30, fontSize: 24, fontWeight: 900, letterSpacing: 5, color: "#fff", padding: "10px 24px", borderRadius: 14, background: "linear-gradient(135deg, rgba(220,38,38,0.92), rgba(127,29,29,0.92))", border: "1.5px solid rgba(255,255,255,0.5)", boxShadow: "0 10px 36px rgba(220,38,38,0.5)", animation: "noMoreBets 1.6s ease-out forwards", pointerEvents: "none", whiteSpace: "nowrap", fontFamily: "'Playfair Display', serif" },
   topBar: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0 8px", marginBottom: 4, paddingRight: 40 },
-  topBack: { width: 32, height: 32, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "#fff", fontSize: 16, cursor: "pointer", flexShrink: 0 },
+  topBack: { width: 32, height: 32, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "#fff", fontSize: 16, cursor: "pointer", flexShrink: 0 , boxShadow: EDGE(3, "rgba(0,0,0,0.45)")},
   topTitleBox: { flex: 1, minWidth: 0, overflow: "hidden" },
   topTitle: { fontSize: 15, fontWeight: 900, letterSpacing: 1, fontFamily: "'Playfair Display', Georgia, serif", color: "#E8C676", whiteSpace: "nowrap" },
   topSub: { display: "flex", gap: 8, flexWrap: "nowrap", alignItems: "center", fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.7)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden" },
@@ -1768,28 +1753,28 @@ const S = {
   roadsBox: { display: "flex", flexDirection: "column", gap: 6 },
   summaryRow: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4, fontSize: 11, fontWeight: 800, color: "#fff" },
   summaryNo: { fontSize: 12, fontWeight: 900, color: "#E3B23C", marginRight: 2 },
-  summaryChip: { padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: 900 },
+  summaryChip: { padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: 900 , boxShadow: "0 2px 0 rgba(0,0,0,0.45)"},
   summaryPair: { fontSize: 10, color: "#60A5FA", fontWeight: 900 },
   summaryShoe: { marginLeft: "auto", fontSize: 9, letterSpacing: 1, color: "rgba(255,255,255,0.45)" },
   areaRow: { display: "flex", gap: 4, alignItems: "stretch", marginBottom: 6 },
-  perfectBar: { width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "5px 10px", marginBottom: 4, borderRadius: 12, border: "1.5px solid", background: "rgba(212,165,116,0.08)", color: "#fff", cursor: "pointer" },
+  perfectBar: { width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "5px 10px", marginBottom: 4, borderRadius: 12, border: "1.5px solid", background: "rgba(212,165,116,0.08)", color: "#fff", cursor: "pointer" , boxShadow: EDGE(3, "rgba(120,80,30,0.6)")},
   ctrlRow: { display: "flex", gap: 6 },
-  ctrlBtn: { flex: 1, minWidth: 0, padding: "10px 4px", borderRadius: 10, border: "none", color: "#fff", fontSize: 11, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" },
-  sitOutBtn: { width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 10, border: "1px dashed rgba(255,255,255,0.25)", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+  ctrlBtn: { flex: 1, minWidth: 0, padding: "10px 4px", borderRadius: 10, border: "none", color: "#fff", fontSize: 11, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" , boxShadow: EDGE(4, "rgba(0,0,0,0.5)")},
+  sitOutBtn: { width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 10, border: "1px dashed rgba(255,255,255,0.25)", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: 700, cursor: "pointer" , boxShadow: EDGE(3, "rgba(0,0,0,0.35)")},
   sitOutBtnOn: { border: "1px solid rgba(251,191,36,0.6)", background: "rgba(251,191,36,0.12)", color: "#FBBF24" },
-  rowArea: { position: "relative", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", gap: 2, padding: "8px 2px 6px", border: "2px solid", borderRadius: 14, cursor: "pointer", color: "#fff" },
+  rowArea: { position: "relative", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", gap: 2, padding: "8px 2px 6px", border: "2px solid", borderRadius: 14, cursor: "pointer", color: "#fff" , boxShadow: EDGE(5, "rgba(0,0,0,0.4)")},
   areaStat: { display: "flex", flexDirection: "column", alignItems: "center", gap: 0, fontSize: 9, fontWeight: 800, lineHeight: 1.25, color: "rgba(255,255,255,0.9)" },
   seatBar: { display: "flex", justifyContent: "space-between", gap: 2, margin: "4px 0 12px", padding: "8px 4px 6px", borderRadius: 14, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(212,165,116,0.18)" },
   seatPod: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   seatAvatarBig: { position: "relative", width: 36, height: 36, borderRadius: "50%", border: "2.5px solid", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900 },
   seatNo: { position: "absolute", bottom: -4, right: -4, minWidth: 14, height: 14, borderRadius: 7, background: "#111827", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", fontSize: 8, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 2px" },
-  seatEmpty: { width: 36, height: 36, borderRadius: "50%", border: "2px dashed rgba(255,255,255,0.25)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 800, cursor: "pointer" },
+  seatEmpty: { width: 36, height: 36, borderRadius: "50%", border: "2px dashed rgba(255,255,255,0.25)", background: "transparent", color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 800, cursor: "pointer" , boxShadow: "0 2px 0 rgba(0,0,0,0.35)"},
   seatName: { fontSize: 9, fontWeight: 800, width: "100%", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minHeight: 11 },
   seatStatus: { fontSize: 8, fontWeight: 800, letterSpacing: 0.3, textAlign: "center", lineHeight: 1.2, minHeight: 10, width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  nudgeBtn: { marginTop: 2, padding: "2px 6px", borderRadius: 8, border: "1px solid rgba(251,191,36,0.6)", background: "rgba(251,191,36,0.15)", color: "#FBBF24", fontSize: 9, fontWeight: 800, cursor: "pointer" },
+  nudgeBtn: { marginTop: 2, padding: "2px 6px", borderRadius: 8, border: "1px solid rgba(251,191,36,0.6)", background: "rgba(251,191,36,0.15)", color: "#FBBF24", fontSize: 9, fontWeight: 800, cursor: "pointer" , boxShadow: "0 2px 0 rgba(0,0,0,0.45)"},
   spectatorNote: { margin: "-6px 0 10px", padding: "6px 10px", borderRadius: 10, background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.35)", color: "#93C5FD", fontSize: 11, fontWeight: 700, textAlign: "center" },
   warnBanner: { margin: "0 0 8px", padding: "8px 12px", borderRadius: 12, background: "linear-gradient(135deg, rgba(220,38,38,0.35), rgba(127,29,29,0.35))", border: "1.5px solid rgba(239,68,68,0.7)", color: "#FECACA", fontSize: 12, fontWeight: 800, textAlign: "center", animation: "warnPulse 1s ease-in-out infinite" },
-  readyBtn: { width: "100%", marginTop: 8, padding: 14, borderRadius: 14, border: "none", color: "#fff", fontSize: 14, fontWeight: 900, letterSpacing: 1, cursor: "pointer" },
+  readyBtn: { width: "100%", marginTop: 8, padding: 14, borderRadius: 14, border: "none", color: "#fff", fontSize: 14, fontWeight: 900, letterSpacing: 1, cursor: "pointer" , boxShadow: EDGE(5, "rgba(0,0,0,0.5)")},
   otherChips: { display: "flex", alignItems: "center", justifyContent: "center", flexWrap: "wrap", gap: 2, margin: "2px 0", pointerEvents: "none" },
   otherChip: { position: "relative", display: "inline-block" },
   seatBadge: { position: "absolute", top: -3, right: -3, minWidth: 11, height: 11, borderRadius: 6, background: "#111827", border: "1px solid rgba(255,255,255,0.5)", color: "#fff", fontSize: 7, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" },
@@ -1798,15 +1783,15 @@ const S = {
   seatPill: { display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px 4px 4px", borderRadius: 20, border: "1px solid" },
   seatAvatar: { width: 22, height: 22, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 },
   myResult: { display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderRadius: 18, border: "1.5px solid", marginBottom: 12, cursor: "pointer", animation: "resultRise 0.45s ease-out" },
-  chipSelRing: { position: "absolute", inset: -3, borderRadius: "50%", border: "2px solid #FFD76A", pointerEvents: "none" },
+  chipSelRing: { position: "absolute", top: -3, left: -3, right: -3, bottom: -3, borderRadius: "50%", border: "2px solid #FFD76A", pointerEvents: "none" },
   chipControls: { display: "flex", gap: 8, marginBottom: 6 },
   chipControlBtn: { flex: 1, height: 42, fontSize: 12, fontWeight: 800, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", boxShadow: "0 4px 10px rgba(0,0,0,0.3)" },
-  actionBtn: { width: "100%", padding: 18, background: "linear-gradient(135deg, #D4A574, #B07D46)", border: "none", color: "#000", borderRadius: 16, fontSize: 15, fontWeight: 900, letterSpacing: 2, cursor: "pointer", boxShadow: "0 8px 20px rgba(212,165,116,0.3)" },
+  actionBtn: { width: "100%", padding: 18, background: "linear-gradient(180deg, #FFF0B6 0%, #D7AD58 42%, #986526 100%)", border: "none", color: "#000", borderRadius: 16, fontSize: 15, fontWeight: 900, letterSpacing: 2, cursor: "pointer" , boxShadow: "0 6px 0 #63451F, 0 14px 22px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.65)", textShadow: "0 1px 0 rgba(255,255,255,0.25)"},
 
   statusBar: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: 16, background: "rgba(212,165,116,0.08)", border: "1px dashed rgba(212,165,116,0.35)", borderRadius: 14, textAlign: "center", color: "#D4A574", fontSize: 13, fontWeight: 700 },
   ownerTag: { fontSize: 10, color: "rgba(255,255,255,0.7)", marginTop: -8, marginBottom: 10, letterSpacing: 0.5 },
   squeezeGuide: { textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.55)", margin: "4px 0 10px", padding: 6, background: "rgba(255,255,255,0.03)", borderRadius: 8 },
-  revealAllBtn: { width: "100%", padding: 14, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(212,165,116,0.4)", color: "#F0D4B8", borderRadius: 14, fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: 1 },
+  revealAllBtn: { width: "100%", padding: 14, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(212,165,116,0.4)", color: "#F0D4B8", borderRadius: 14, fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: 1 , boxShadow: EDGE(4, "rgba(0,0,0,0.4)")},
 
   toast: { position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", background: "rgba(20,20,25,0.95)", border: "1px solid rgba(212,165,116,0.5)", color: "#F0D4B8", padding: "10px 18px", borderRadius: 24, fontSize: 12, fontWeight: 700, zIndex: 10100, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", animation: "toastIn 0.25s ease-out", maxWidth: "90vw", textAlign: "center" },
 };
