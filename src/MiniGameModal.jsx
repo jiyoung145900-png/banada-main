@@ -10,7 +10,7 @@
 //   currentUser: 현재 로그인 유저
 // ===================================================================
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { doc, getDoc, updateDoc, onSnapshot } from "firebase/firestore";
 import { db } from "./firebase";
 // ★ [변경] 바카라를 라이브 멀티플레이로 교체
@@ -79,17 +79,31 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
     })();
   }, [isOpen, userId]);
 
+  // 포인트 저장: 저장 중에 새 값이 들어오면 버리지 않고 '가장 최근 값' 을 대기시켰다가 앞 저장이 끝나면 이어서 저장
+  //   (예전에는 저장 중이면 새 값을 그냥 버려서, 딜 → 결과 지급이 연달아 오면 마지막 값이 서버에 안 올라갔음)
+  const savingRef = useRef(false);
+  const pendingPointsRef = useRef(null);
   const handlePointsChange = async (newPoints) => {
     setPoints(newPoints);
-    if (!userId || saving) return;
+    if (!userId) return;
+    if (savingRef.current) { pendingPointsRef.current = newPoints; return; }
+    savingRef.current = true;
     setSaving(true);
-
+    let value = newPoints;
     try {
-      const userRef = doc(db, "users", userId);
-      await updateDoc(userRef, { gamePoints: newPoints });
-    } catch (e) {
-      console.error("포인트 저장 실패:", e);
+      for (;;) {
+        try {
+          const userRef = doc(db, "users", userId);
+          await updateDoc(userRef, { gamePoints: value });
+        } catch (e) {
+          console.error("포인트 저장 실패:", e);
+        }
+        if (pendingPointsRef.current === null) break;
+        value = pendingPointsRef.current;
+        pendingPointsRef.current = null;
+      }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -137,7 +151,7 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
 
   return (
     <div style={S.overlay} onClick={handleClose}>
-      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+      <div style={screen === "baccarat_table" ? { ...S.modal, maxWidth: 1080 } : S.modal} onClick={(e) => e.stopPropagation()}>
         {/* 닫기 */}
         <button onClick={handleClose} style={S.closeBtn}>✕</button>
 
@@ -170,6 +184,8 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
             )}
             {screen === "baccarat_table" && currentBaccaratTable && (
               <BaccaratLiveTable
+                key={currentBaccaratTable}
+                onSwitchTable={(id) => setCurrentBaccaratTable(id)}
                 tableId={currentBaccaratTable}
                 userId={userId}
                 userName={currentUser?.nickname || currentUser?.id || "GUEST"}
