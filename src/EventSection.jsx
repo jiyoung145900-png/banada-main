@@ -190,11 +190,11 @@ export default function EventSection({
   }, [totalHistory]);
 
   // ═══════════════════════════════════════════════════════════════
-  // ★ [신규] game_history에 없는 회차의 결과를 즉석 계산하는 fallback
-  //   원인: 라운드 종료 시점에 아무도 이벤트 화면을 켜놓고 있지 않으면
-  //         game_history 문서가 아예 안 생겨서 "내 후원 기록"에 결과가 안 뜨는 문제.
-  //   → round 번호만으로 결정되는 EventService.generateResult로 그 자리에서
-  //     동일한 결과를 재계산 (진짜 결과이지 "추정"이 아니므로 유저에게 그대로 노출)
+  // ★ [수정] 서버 결과만 사용 (로컬 계산 제거)
+  //   - EventService.generateResult 는 보안상(유저가 결과 조작 가능) 삭제된 함수라
+  //     호출하면 "generateResult is not a function" 오류가 3분마다 발생했음.
+  //   - 결과는 Cloud Function(scheduledSettlement)만 생성 → game_history 저장.
+  //   - 클라이언트는 읽기만. 아직 결과가 없으면 조용히 넘어감.
   // ═══════════════════════════════════════════════════════════════
   const [fallbackWinItems, setFallbackWinItems] = useState({});
   const inFlightRoundsRef = useRef(new Set());
@@ -202,24 +202,12 @@ export default function EventSection({
   const resolveWinItems = useCallback(async (targetR) => {
     try {
       const fixed = await EventService.getFixedResult(targetR);
-      const winObjs = fixed || EventService.generateResult(targetR);
-      const winItemsStr = winObjs.map(v => `${v.icon} ${v.name}`);
+      if (!fixed || fixed.length === 0) return; // 서버에 아직 결과 없음 → skip
 
+      const winItemsStr = fixed.map(v => `${v.icon} ${v.name}`);
       setFallbackWinItems(prev => ({ ...prev, [targetR]: winItemsStr }));
-
-      // 계산한 결과를 game_history에도 저장해서 이후엔 정상 데이터처럼 조회되게 함
-      try {
-        await setDoc(doc(db, "game_history", String(targetR)), {
-          round: targetR,
-          winner: winObjs.map(v => v.name),
-          winItems: winItemsStr,
-          savedAt: new Date().toISOString(),
-        }, { merge: true });
-      } catch (writeErr) {
-        console.warn(`game_history 자동 복구 저장 실패 (${targetR}회차):`, writeErr);
-      }
     } catch (e) {
-      console.error(`${targetR}회차 결과 계산 실패:`, e);
+      console.error(`${targetR}회차 결과 조회 실패:`, e);
     }
   }, []);
 
