@@ -20,6 +20,10 @@ import RouletteGame from "./RouletteGame";
 import BlackjackGame from "./BlackjackGame";
 import HoldemLobby from "./HoldemLobby";
 import HoldemTable from "./HoldemTable";
+// 🎴 [신규] 맞고 (화투)
+import MatgoLobby from "./MatgoLobby";
+import MatgoTable from "./MatgoTable";
+import { setMatgoUser } from "./MatgoFirestore";
 
 const INITIAL_POINTS = 10000;
 const DAILY_BONUS = 1000;
@@ -27,10 +31,11 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function MiniGameModal({ isOpen, onClose, currentUser }) {
   const [points, setPoints] = useState(0);
-  // screen: lobby, baccarat_lobby, baccarat_table, roulette, blackjack, holdem_lobby, holdem_table
+  // screen: lobby, baccarat_lobby, baccarat_table, roulette, blackjack, holdem_lobby, holdem_table, matgo_lobby, matgo_table
   const [screen, setScreen] = useState("lobby");
   const [currentTableId, setCurrentTableId] = useState(null);
   const [currentBaccaratTable, setCurrentBaccaratTable] = useState(null);
+  const [currentMatgoTable, setCurrentMatgoTable] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bonusMsg, setBonusMsg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -135,9 +140,26 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
     setScreen("baccarat_lobby");
   };
 
-  // ★ 바카라: 베팅 차감/정산 지급을 서버가 처리하므로 포인트를 실시간 동기화 (읽기 전용)
+  // 🎴 [신규] 맞고 테이블 입장/퇴장
+  const handleEnterMatgoTable = (tableId) => {
+    setCurrentMatgoTable(tableId);
+    setScreen("matgo_table");
+  };
+  const handleLeaveMatgoTable = () => {
+    setCurrentMatgoTable(null);
+    setScreen("matgo_lobby");
+  };
+
+  // 🎴 맞고: 서버 호출 시 userId/nickname 전달 (한 번만)
+  useEffect(() => {
+    if (userId) {
+      setMatgoUser(userId, currentUser?.nickname || currentUser?.id || "GUEST");
+    }
+  }, [userId, currentUser?.nickname, currentUser?.id]);
+
+  // ★ 바카라/맞고: 베팅 차감/정산 지급을 서버가 처리하므로 포인트를 실시간 동기화 (읽기 전용)
   //   로비 화면에서도 유지 → 나가는 순간 도착하는 정산도 반영됨
-  const syncPoints = screen === "lobby" || screen.startsWith("baccarat");
+  const syncPoints = screen === "lobby" || screen.startsWith("baccarat") || screen.startsWith("matgo");
   useEffect(() => {
     if (!isOpen || !userId || !syncPoints) return;
     const unsub = onSnapshot(doc(db, "users", userId), (snap) => {
@@ -151,7 +173,7 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
 
   return (
     <div style={S.overlay} onClick={handleClose}>
-      <div style={screen === "baccarat_table" ? { ...S.modal, maxWidth: 1080 } : S.modal} onClick={(e) => e.stopPropagation()}>
+      <div style={(screen === "baccarat_table" || screen === "matgo_table") ? { ...S.modal, maxWidth: 1080 } : S.modal} onClick={(e) => e.stopPropagation()}>
         {/* 닫기 */}
         <button onClick={handleClose} style={S.closeBtn}>✕</button>
 
@@ -217,6 +239,26 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
                 gamePoints={points}
                 onPointsChange={handlePointsChange}
                 onLeave={handleLeaveTable}
+              />
+            )}
+            {screen === "matgo_lobby" && (
+              <MatgoLobby
+                userId={userId}
+                userName={currentUser?.nickname || currentUser?.id || "GUEST"}
+                gamePoints={points}
+                onPointsChange={handlePointsChange}
+                onEnterTable={handleEnterMatgoTable}
+                onBack={() => setScreen("lobby")}
+              />
+            )}
+            {screen === "matgo_table" && currentMatgoTable && (
+              <MatgoTable
+                tableId={currentMatgoTable}
+                userId={userId}
+                userName={currentUser?.nickname || currentUser?.id || "GUEST"}
+                gamePoints={points}
+                onPointsChange={handlePointsChange}
+                onBack={handleLeaveMatgoTable}
               />
             )}
           </>
@@ -352,6 +394,10 @@ function Lobby({ points, onSelect, userName }) {
           type="holdem"
           onClick={() => onSelect("holdem_lobby")}
         />
+        <PremiumGameCard
+          type="matgo"
+          onClick={() => onSelect("matgo_lobby")}
+        />
       </div>
 
       {/* 안내 */}
@@ -361,7 +407,7 @@ function Lobby({ points, onSelect, userName }) {
           · 실제 다이아와 무관<br />
           · 일일 로그인 보너스 +{DAILY_BONUS.toLocaleString()}P<br />
           · 파산 시 자동으로 {INITIAL_POINTS.toLocaleString()}P 지급<br />
-          · 바카라/홀덤 멀티플레이 가능
+          · 바카라/홀덤/맞고 멀티플레이 가능
         </div>
       </div>
     </div>
@@ -412,8 +458,18 @@ function PremiumGameCard({ type, onClick }) {
       color: "#10B981",
       colorRgb: "16,185,129",
       bgGradient: "linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(24,74,48,0.4) 100%)",
+    },
+    matgo: {
+      icon: "🎴",
+      iconStyle: { fontSize: 36 },
+      title: "MATGO",
+      subtitle: "2인 맞고 (화투)",
+      desc: "7점 달성 · GO or STOP",
+      color: "#4CAF50",
+      colorRgb: "76,175,80",
+      bgGradient: "linear-gradient(135deg, rgba(76,175,80,0.15) 0%, rgba(24,74,32,0.4) 100%)",
       badge: "NEW",
-      badgeStyle: { background: "#10B981" },
+      badgeStyle: { background: "#4CAF50" },
     },
   };
   const cfg = configs[type];
