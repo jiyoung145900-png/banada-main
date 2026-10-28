@@ -24,6 +24,7 @@ export default function MatgoLobby({
   gamePoints,
   onPointsChange,
   onEnterTable,
+  onEnterSolo,  // 🤖 [신규] AI 연습 모드 진입
   onBack,
 }) {
   const tables = useAllMatgoTables();
@@ -73,6 +74,23 @@ export default function MatgoLobby({
           입장료 {ENTRY_FEE.toLocaleString()} · 승자가 양쪽 입장료 획득
         </div>
       </div>
+
+      {/* 🤖 AI 연습 모드 카드 */}
+      {onEnterSolo && (
+        <div style={S.soloCard} onClick={onEnterSolo}>
+          <div style={S.soloCardLeft}>
+            <div style={S.soloCardIcon}>🤖</div>
+            <div>
+              <div style={S.soloCardTitle}>AI와 연습 (어려움)</div>
+              <div style={S.soloCardDesc}>
+                포인트 사용 안함 · 혼자서 바로 플레이<br />
+                똑똑한 AI와 1:1 대전
+              </div>
+            </div>
+          </div>
+          <div style={S.soloCardBadge}>FREE →</div>
+        </div>
+      )}
 
       {/* 테이블 리스트 */}
       <div style={S.tableGrid}>
@@ -335,6 +353,41 @@ const S = {
   },
   introText: {
     fontSize: 11, color: "rgba(255,255,255,0.75)", lineHeight: 1.6,
+  },
+
+  // 🤖 AI 연습 카드
+  soloCard: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: 16,
+    background: "linear-gradient(135deg, rgba(156,39,176,0.15), rgba(76,175,80,0.1))",
+    border: "1px solid rgba(156,39,176,0.4)",
+    borderRadius: 12,
+    marginBottom: 14,
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+  },
+  soloCardLeft: {
+    display: "flex", alignItems: "center", gap: 14,
+  },
+  soloCardIcon: {
+    fontSize: 36,
+    filter: "drop-shadow(0 0 10px rgba(156,39,176,0.6))",
+  },
+  soloCardTitle: {
+    fontSize: 13, fontWeight: 800, color: "#CE93D8",
+    letterSpacing: 1, marginBottom: 2,
+  },
+  soloCardDesc: {
+    fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.5,
+  },
+  soloCardBadge: {
+    background: "linear-gradient(135deg, #9C27B0, #6A1B9A)",
+    color: "#fff",
+    padding: "8px 14px",
+    borderRadius: 20,
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: 1,
   },
 
   // 테이블 그리드

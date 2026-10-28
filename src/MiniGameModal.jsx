@@ -23,6 +23,7 @@ import HoldemTable from "./HoldemTable";
 // 🎴 [신규] 맞고 (화투)
 import MatgoLobby from "./MatgoLobby";
 import MatgoTable from "./MatgoTable";
+import MatgoSoloTable from "./MatgoSoloTable";
 import { setMatgoUser } from "./MatgoFirestore";
 
 const INITIAL_POINTS = 10000;
@@ -31,7 +32,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function MiniGameModal({ isOpen, onClose, currentUser }) {
   const [points, setPoints] = useState(0);
-  // screen: lobby, baccarat_lobby, baccarat_table, roulette, blackjack, holdem_lobby, holdem_table, matgo_lobby, matgo_table
+  // screen: lobby, baccarat_lobby, baccarat_table, roulette, blackjack, holdem_lobby, holdem_table, matgo_lobby, matgo_table, matgo_solo
   const [screen, setScreen] = useState("lobby");
   const [currentTableId, setCurrentTableId] = useState(null);
   const [currentBaccaratTable, setCurrentBaccaratTable] = useState(null);
@@ -150,6 +151,14 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
     setScreen("matgo_lobby");
   };
 
+  // 🤖 [신규] AI 혼자 모드 진입/퇴장
+  const handleEnterMatgoSolo = () => {
+    setScreen("matgo_solo");
+  };
+  const handleLeaveMatgoSolo = () => {
+    setScreen("matgo_lobby");
+  };
+
   // 🎴 맞고: 서버 호출 시 userId/nickname 전달 (한 번만)
   useEffect(() => {
     if (userId) {
@@ -248,6 +257,7 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
                 gamePoints={points}
                 onPointsChange={handlePointsChange}
                 onEnterTable={handleEnterMatgoTable}
+                onEnterSolo={handleEnterMatgoSolo}
                 onBack={() => setScreen("lobby")}
               />
             )}
@@ -259,6 +269,13 @@ export default function MiniGameModal({ isOpen, onClose, currentUser }) {
                 gamePoints={points}
                 onPointsChange={handlePointsChange}
                 onBack={handleLeaveMatgoTable}
+              />
+            )}
+            {screen === "matgo_solo" && (
+              <MatgoSoloTable
+                userId={userId}
+                userName={currentUser?.nickname || currentUser?.id || "GUEST"}
+                onBack={handleLeaveMatgoSolo}
               />
             )}
           </>
